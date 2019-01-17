@@ -33,6 +33,9 @@
 ! tracer not untill a larger size is reached which is given in jobfile  
 ! number of precipitation cells is given as input now. But can be done nicer
 !
+! 2018 Dec
+! set tracer at multiple times
+!
 ! OUTPUT: 
 ! traced(CP-ID,int tracer ID, property) 
 ! traced(:,:, 1)   x pos of tracer 
@@ -46,13 +49,13 @@
 ! traced(:,:, 9)   CP ID
 ! traced(:,:,10)   gloabl tracer number 
 ! traced(:,:,11)   active 0-1 
-! traced(:,:,12)   start time of tracer 
+! traced(:,:,12)   ID merging 
 ! traced(:,:,13)   u 
 ! traced(:,:,14)   v
 ! traced(:,:,15)   distance from tracer to COG in x direction 
 ! traced(:,:,16)   merger 
 ! traced(:,:,17)   distance from tracer to COG in x direction
-! traced(:,:,18)   precip is ongoing
+! traced(:,:,18)   timesteps set after precip start 
 ! traced(:,:,19)   vrad
 ! traced(:,:,20)   vtan
 PROGRAM cp_tracking
@@ -91,20 +94,22 @@ INTEGER              :: timestep
 INTEGER              :: count_tracer             ! counts the internal tracer in an individual CP
 
 !INITIALIZE some values
-namelist /INPUTgeneral/ dsize_x, dsize_y, dt, res 
-namelist /INPUTtracer/ max_tracer_CP, max_age, rad
+namelist /INPUTgeneral/ dsize_x, dsize_y, dt, res, lformat 
+namelist /INPUTtracer/ max_tracer_CP, nTrSet, ntset, max_age, rad
 namelist /INPUTIO/ odir
 open(100,file='job/namelist.dat')
 read(100,nml=INPUTgeneral)
 read(100,nml=INPUTIO)
 read(100,nml=INPUTtracer)
 
+
 !get number of tracked precip events
 !CALL getarg(max_no_of_cells)
 OPEN(1111,FILE='na.txt')
 READ(1111,*) max_no_of_cells
+!max_tracer_CP = nTrSet * ntset
 max_tracers = max_no_of_cells*max_tracer_CP
-
+write(*,*) "max_tracers", max_tracers, "max_no_of_cells", max_no_of_cells, "max_tracer_CP", max_tracer_CP 
 ! allocate fields
 ALLOCATE(cpio(max_no_of_cells,3))
 ALLOCATE(traced(max_no_of_cells,max_tracer_CP,20))
@@ -121,24 +126,25 @@ ALLOCATE(already_tracked(max_no_of_cells))
 ALLOCATE(input_field(dsize_x,dsize_y))
 ALLOCATE(tracpo(2,max_tracers))
 
-!find merging events and start of tracer
  i =1
  OPEN(1,FILE=trim(odir) // '/input/cp/mergingCPs.txt',FORM='formatted',ACTION='read',IOSTAT=ierr) 
  IF ( ierr == 0) then
-   DO
+   DO i =1, max_no_of_cells,1
+write(*,*) i
      READ(1,*,END=400) cpio(i,1), cpio(i,2), cpio(i,3)
-     i = i +1
+write(*,*) cpio(i,1), cpio(i,2), cpio(i,3)
    END DO
  ELSE 
      write(*,*) 'Beim Oeffnen der Datei ist ein Fehler Nr.', ierr,' aufgetreten'
  END IF
 400 CONTINUE
-
+write(*,*) 'read data'
 OPEN(2,FILE=trim(odir) // '/output/raincell/irt_tracks_mask.srv',    FORM='unformatted', ACTION='read')
 OPEN(40,FILE=trim(odir) // '/output/cp/coldpool_tracer_out.txt',FORM='formatted', ACTION='write')
-OPEN(4,FILE=trim(odir) // '/input/cp/input_u.srv',FORM='unformatted', ACTION='read')
-OPEN(5,FILE=trim(odir) // '/input/cp/input_v.srv',FORM='unformatted', ACTION='read')
-
+if (trim(lformat) == 'srv') then
+  OPEN(4,FILE=trim(odir) // '/input/cp/input_u.srv',FORM='unformatted',ACTION='read')
+  OPEN(5,FILE=trim(odir) // '/input/cp/input_v.srv',FORM='unformatted',ACTION='read')
+end if
 
 write(*,*) i, 'rain cells found'
 
@@ -160,17 +166,25 @@ timestep=0
  begin = tts
 
  DO !start main loop
+ write(*,*) 'at timestep', timestep
+ IF (timestep .ge. maxval(cpio(:,3),1)) then
+ GOTO 5000
+ END IF 
 ! only for testing
-   traced(:,:,18) = 0  ! set ongoing precip 0 
    timestep=timestep+1 ! OCH: starts with 0 ?
    !if (IDstart(ID) .eq. 0) IDstart(ID) = cpio(ID,3) !new CP 
    track_numbers(:,:)=0 
 ! read velocity files
-   READ (4,END=200) srv_header_input
-   READ (4) vel(:,:,1)
-   READ (5,END=200) srv_header_input
-   READ (5) vel(:,:,2)
-
+   if (trim(lformat) == 'srv') then
+     READ (4,END=200) srv_header_input
+     READ (4) vel(:,:,1)
+     READ (5,END=200) srv_header_input
+     READ (5) vel(:,:,2)
+   else if (trim(lformat) == 'nc') then
+     CALL read_nc_2D (vel(:,:,1),'U',trim(odir) // '/input/cp/input_u.nc',timestep)
+     CALL read_nc_2D (vel(:,:,2),'V',trim(odir) // '/input/cp/input_v.nc',timestep)
+     CALL read_nc_2D (track_numbers,'trackID',trim(odir) // '/output/raincell/irt_tracks_mask_fulltime.nc',timestep)
+   end if
    ! read velocity files until start of tracking is reached, if so, also read
    ! tracking
    IF (timestep .GE. begin) THEN !max(onset,time_step_event)) THEN
@@ -180,7 +194,6 @@ timestep=0
      COMy(ID) = yCOG
      !area(ID) = areain
      DO WHILE (tts .eq. timestep ) !as long as CPs at the same tiemstep are read
-       traced(ID,:,18) = 1 ! precip is ongoing
        READ(3,153,END=200)  ID, tts, xCOG,yCOG ! read next line 
        IF (tts .eq. timestep ) THEN ! and store COG if still at the same timestep
          COMx(ID) = xCOG
@@ -191,12 +204,11 @@ timestep=0
        ! dont overwrite COG (will be stored in xCOG until the next timestep)
      END DO ! all COGs for this timestep are read
      ! reading velocity field and passive tracer
-!     CALL read_nc_2D(vel(:,:,1), 'u', 'input/cp/input_u.nc',timestep)
-!     CALL read_nc_2D(vel(:,:,2), 'v', 'input/cp/input_v.nc',timestep)
      ! reading the track input files
+   if (trim(lformat) == 'srv') then
      READ(2,END=200) srv_header_input
      READ(2) track_numbers(:,:)
-
+   end if
      IF (timestep .GE. onset) THEN !not neccesarry to call any of the routines before onset (=first track has reached minimum size for tracer tracking)  
        ! identification of edges, and set tracer
        nneighb(:,:)=0 
@@ -209,7 +221,6 @@ timestep=0
        CALL maxcell(track_numbers,COMx,COMy,rmax,max_no_of_cells)
        CALL initCircle(max_no_of_cells,timestep,traced, COMx,COMy,&
                        rmax,cpio,max_tracers,tracpo,count_tracer)
-
        CALL velocity_interpol(vel(:,:,1),vel(:,:,2),timestep,traced, count_tracer, &
                           max_no_of_cells,tracpo,max_tracers)
        CALL geometry(traced,COMx,COMy,already_tracked,max_no_of_cells)
@@ -241,7 +252,7 @@ timestep=0
  END DO
  200 CONTINUE
  WRITE(*,*) "finished main loop" 
-! 5000 CONTINUE
+ 5000 CONTINUE
  
 
 CONTAINS
@@ -253,28 +264,28 @@ CONTAINS
 !! -----------------------------------------------------------------------
 !! input 2D nc data
 !! -----------------------------------------------------------------------
-!  SUBROUTINE read_nc_2D (poutput,varname, filename,ctime)
-!
-!  IMPLICIT NONE
-!  character(*), intent(in) :: varname, filename
-!  real, dimension(:,:), intent(inout) :: poutput
-!  integer :: ncId, rhVarId, nx, ny, nz, nt, ctime
-!  integer, dimension(nf90_max_var_dims) :: dimIDs
-!!  real, allocatable, dimension(:,:,:) ::  zvar
-!    CALL check(nf90_open(filename, nf90_NoWrite, ncid))
-!    CALL check(nf90_inq_varid(ncid,varname, rhVarId))
-!    CALL check(nf90_inquire_variable(ncid, rhVarId, dimids = dimIDs))
-!    CALL check(nf90_inquire_dimension(ncid, dimIDs(4), len = nt))
-!    CALL check(nf90_inquire_dimension(ncid, dimIDs(3), len = nx))
-!    CALL check(nf90_inquire_dimension(ncid, dimIDs(2), len = ny))
-!    CALL check(nf90_inquire_dimension(ncid, dimIDs(1), len = nz))
-!write(*,*) ctime
-!    CALL check(nf90_get_var(ncid, rhVarId, poutput, start =(/1,1,1,ctime/),&
-!                                                    count= (/0,nx, ny, 1/)))
-!    CALL check(nf90_close(ncid))
+  SUBROUTINE read_nc_2D (poutput,varname, filename,ctime)
+
+  IMPLICIT NONE
+  character(*), intent(in) :: varname, filename
+  real, dimension(:,:), intent(inout) :: poutput
+  integer :: ncId, rhVarId, nx, ny, nz, nt, ctime
+  integer, dimension(nf90_max_var_dims) :: dimIDs
+!  real, allocatable, dimension(:,:,:) ::  zvar
+    CALL check(nf90_open(filename, nf90_NoWrite, ncid))
+    CALL check(nf90_inq_varid(ncid,varname, rhVarId))
+    CALL check(nf90_inquire_variable(ncid, rhVarId, dimids = dimIDs))
+    CALL check(nf90_inquire_dimension(ncid, dimIDs(4), len = nt))
+    CALL check(nf90_inquire_dimension(ncid, dimIDs(1), len = nx))
+    CALL check(nf90_inquire_dimension(ncid, dimIDs(2), len = ny))
+    CALL check(nf90_inquire_dimension(ncid, dimIDs(3), len = nz))
+write(*,*) ctime
+    CALL check(nf90_get_var(ncid, rhVarId, poutput(1:nx,1:ny), start =(/1,1,1,ctime/),&
+                                                    count= (/nx, ny,1, 1/)))
+    CALL check(nf90_close(ncid))
 !write(*,*) poutput(1:3,1:3)
 !
-!  END SUBROUTINE read_nc_2D
+  END SUBROUTINE read_nc_2D
 
 !---------------------------------------------------
 ! CHECK NETCD DATA
@@ -356,7 +367,7 @@ END SUBROUTINE maxcell
 !                      rmax,cpio,max_tracers,tracpo,count_tracer)
 SUBROUTINE initCircle(max_no_of_cells,ts,traced, COMx,COMy, &
                       rmax,cpio,max_tracers,tracpo,count_tracer)
-   USE cp_parameters, ONLY : dsize_x, dsize_y,max_tracer_CP
+   USE cp_parameters, ONLY : dsize_x, dsize_y,max_tracer_CP, nTrSet, ntset
   
   INTEGER, INTENT(IN)       :: max_no_of_cells, max_tracers, ts
 !  INTEGER, INTENT(IN)       :: IDstart(max_no_of_cells)
@@ -367,34 +378,40 @@ SUBROUTINE initCircle(max_no_of_cells,ts,traced, COMx,COMy, &
   INTEGER, INTENT(INOUT)    :: tracpo(2,max_tracers)
   REAL, INTENT(INOUT)       :: traced(max_no_of_cells,max_tracer_CP,20)
   REAL                      :: pi, inc !, reff 
-  INTEGER                   :: i, j
-  
+  INTEGER                   :: i, j, pj, it
   pi = 2.*asin(1.)
-  inc = 2*pi/max_tracer_CP
+  inc = 2*pi/nTrSet !max_tracer_CP
   do i = 1,max_no_of_cells,1 ! loop trough precip cells
+
    if (cpio(i,2) .ne. 0 ) then ! avoid splitting events 
 !   if (IDstart(i) == ts) then ! set new circle when precip begins
-   if (cpio(i,3) == ts) then ! set new circle when precip begins
+   if (ts .ge. cpio(i,3) .and. ts .le. cpio(i,3)+ntset) then ! set new circle when precip begins
      !reff = sqrt(area(i))/pi 
-      do j = 1,max_tracer_CP,1 ! loop trough tracer number
+      do pj = 1,nTrSet,1 !max_tracer_CP,1 ! loop trough tracer number
+
+        j =pj+(ts-cpio(i,3)) * nTrSet
         tracpo(:,count_tracer)=(/i,j/)
         count_tracer           = count_tracer + 1
-        traced(i,j, 1) = MOD(COMx(i) + rmax(i)*cos(j*inc)-1.,float(dsize_x))+1.
-        traced(i,j, 2) = MOD(COMy(i) + rmax(i)*sin(j*inc)-1.,float(dsize_y))+1.
+        traced(i,j, 1) = MOD(COMx(i) + rmax(i)*cos(pj*inc)-1.,float(dsize_x))+1.
+        traced(i,j, 2) = MOD(COMy(i) + rmax(i)*sin(pj*inc)-1.,float(dsize_y))+1.
+        traced(i,j, 3) = nint(traced(i,j, 1))
+        traced(i,j, 4) = nint(traced(i,j, 2))
+        traced(i,j, 5) = rmax(i)
         traced(i,j, 6) = ts ! current time
         if (cpio(i,1) .ne. cpio(i,2)) then
-          traced(i,j,16) =0 
-          traced(i,j,7) = traced(cpio(i,2),j,7)  !set to age that the larger event of the merger has 
+          traced(i,j,16) = 0 
+          traced(i,j,7) = ts-cpio(i,3)  !traced(cpio(i,2),j,7)  !set to age that the larger event of the merger has 
         else
-          traced(i,j, 7) = 0   ! age 
+          traced(i,j, 7) = ts-cpio(i,3)   ! age 
           traced(i,j, 16) = 1
           traced(i,j,12) = cpio(i,2)
         end if
-        !traced(i,j, 8) = j*inc 
+        traced(i,j, 8) = pj*inc 
         traced(i,j, 9) = i 
         traced(i,j,10) = count_tracer 
         traced(i,j,11) = 1   ! active tracer 
-        traced(i,j,12) = cpio(i,2)  ! start 
+        traced(i,j,12) = cpio(i,2)  ! start
+        traced(i,j,18) =  ts-cpio(i,3)
         !traced(i,j,13) = 0   ! u 
         !traced(i,j,14) = 0   ! v
       end do
@@ -485,7 +502,7 @@ USE cp_parameters, ONLY : dsize_x, dsize_y,max_tracer_CP
           write(*,*) "CP ID:", INT(track_numbers(ix,iy)),"tracers:", already_tracked(INT(track_numbers(ix,iy)))
         END IF ! end upper bound of tracer 
       ENDIF ! end precip edge .eq. 1
-    ENDDO ! end loop trough x values
+    ENDDO ! end loop trough x valus
   ENDDO ! end loop trough y values
 
 END SUBROUTINE set_tracer
@@ -513,9 +530,9 @@ USE cp_parameters, ONLY : dsize_x, dsize_y, res, dt, max_tracer_CP
   INTEGER                   :: sub_dt   ! subtimstepping
 
  sub_dt =60 ! update evry min
+   
   it = 1 ! counter trough traced
   DO WHILE (it .LT. count_tracer) ! count tracer are all tracers set until here
-
     ! determining the first time step of the event
      start_time=INT(traced(tracpo(1,it),tracpo(2,it),6))
      ! determining how many timesteps have passed since then
@@ -533,7 +550,6 @@ USE cp_parameters, ONLY : dsize_x, dsize_y, res, dt, max_tracer_CP
 
      ix_l = MOD(INT(ixt-wgt_xt)-1+dsize_x,dsize_x)+1
      iy_l = MOD(INT(iy-wgt_y)-1+dsize_y,dsize_y)+1
-
      ix_r = MOD(ix_l +dsize_x,dsize_x)+1
      iy_r = MOD(iy_l +dsize_y,dsize_y)+1
 
@@ -558,12 +574,13 @@ USE cp_parameters, ONLY : dsize_x, dsize_y, res, dt, max_tracer_CP
              + vely(ix_l,iy_r)*(1-wgt_x)*(  wgt_yt) &
              + vely(ix_r,iy_l)*(  wgt_x)*(1-wgt_yt) &
              + vely(ix_r,iy_r)*(  wgt_x)*(  wgt_yt)
-
      !save the velocities of the tracer
      traced(tracpo(1,it),tracpo(2,it),13) = vx_intp
      traced(tracpo(1,it),tracpo(2,it),14) = vy_intp
+
      it = it+1
    END DO
+
   RETURN
 END SUBROUTINE velocity_interpol 
 
@@ -662,7 +679,7 @@ USE cp_parameters, ONLY : dsize_x, dsize_y, res, dt, max_tracer_CP
      traced(tracpo(1,it),tracpo(2,it),4) = float(iy_new_round)
 
      traced(tracpo(1,it),tracpo(2,it),6) = start_time !timestep
-     traced(tracpo(1,it),tracpo(2,it),7) = tracer_ts  !age
+     traced(tracpo(1,it),tracpo(2,it),7) = traced(tracpo(1,it),tracpo(2,it),7) +1 !tracer_ts  !age
      traced(tracpo(1,it),tracpo(2,it),10) = it
      it = it + 1
 !make separate routine
@@ -829,7 +846,7 @@ USE cp_parameters, ONLY : dsize_x, dsize_y, res, dt, max_tracer_CP
      traced(tracpo(1,it),tracpo(2,it),4) = float(iy_new_round)
 
      traced(tracpo(1,it),tracpo(2,it),6) = start_time !timestep
-     traced(tracpo(1,it),tracpo(2,it),7) = tracer_ts  !age
+     traced(tracpo(1,it),tracpo(2,it),7) = traced(tracpo(1,it),tracpo(2,it),7) +1 !tracer_ts  !age
      traced(tracpo(1,it),tracpo(2,it),10) = it
      it = it + 1
    ENDDO
@@ -948,7 +965,7 @@ USE  cp_parameters, ONLY :max_tracer_CP, max_age
                                max_no_of_cells !, max_tracer_CP 
   INTEGER                   :: it
   INTEGER,INTENT(IN)        :: tracpo(2,max_tracers)
-  REAL, INTENT(INOUT)       :: traced(max_no_of_cells, max_tracer_CP,18)
+  REAL, INTENT(INOUT)       :: traced(max_no_of_cells, max_tracer_CP,20)
   REAL, INTENT(IN)          :: COMx(max_no_of_cells), COMy(max_no_of_cells)
   it=1
 
@@ -961,7 +978,7 @@ USE  cp_parameters, ONLY :max_tracer_CP, max_age
                 2(2X,F8.2),   & !x dist
                 2(2X,F8.2),   & !COG
                 1(2X,I1),     & ! merger
-                1(2X,I4))       ! precip ID
+                2(2X,I4))       ! precip ID
   ! updating previous tracers
   DO WHILE (it .LT. count_tracer)
     IF (traced(tracpo(1,it),tracpo(2,it),11)  .eq. 1.) THEN  !trace only if tracer is active
@@ -974,11 +991,10 @@ USE  cp_parameters, ONLY :max_tracer_CP, max_age
                         traced(tracpo(1,it),tracpo(2,it),13),traced(tracpo(1,it),tracpo(2,it),14),& ! u, v Wind component
                         traced(tracpo(1,it),tracpo(2,it),15),traced(tracpo(1,it),tracpo(2,it),17),& ! x and y distance  
                         COMx(tracpo(1,it)), COMy(tracpo(1,it))                                   ,& ! center
-                        INT(traced(tracpo(1,it),tracpo(2,it),16)), INT(traced(tracpo(1,it),tracpo(2,it),9))   ! merger, prec ID
+                        INT(traced(tracpo(1,it),tracpo(2,it),16)), INT(traced(tracpo(1,it),tracpo(2,it),9)),&   ! merger, prec ID
+                        INT(traced(tracpo(1,it),tracpo(2,it),18))   !timesteps set after precip start
     END IF
-
           END IF
-
     it = it+1
   END DO
 

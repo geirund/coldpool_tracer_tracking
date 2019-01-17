@@ -4,6 +4,7 @@ dsize_x=@{nx},  !domainsize
 dsize_y=@{ny},   
 dt=@{dto},      !output timestep 
 res=@{dx},
+lformat=@{lformat},
 /  
 &INPUTIO
 odir='@{OUT}'
@@ -14,9 +15,11 @@ minimum_size=@{mincellsize}
 /
 &INPUTtracer
 ! cp tracking
-max_tracer_CP=@{tracer},
+nTrSet=@{tracer},
 max_age=@{age}, !older tracer are not written
 rad =@{radv}
+ntset=@{ntset}
+max_tracer_CP=@{alltracer}
 !odir='output/'
 !lstopwind = False  ! stops tracer if accelerated (not working yet)
 !lstopside = True   ! stops all tracer of CP if all on one side of the precip

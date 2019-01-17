@@ -14,7 +14,7 @@ COMPILE_COMMAND='gfortran'
     ${COMPILE_COMMAND} -o $BIN/irt_advection_field_release.x $SRC/irt_advection_field_release.f90 $SRC/irt_parameters.f90
     ${COMPILE_COMMAND} -o $BIN/irt_tracks_release.x $SRC/irt_tracks_release.f90 $SRC/irt_parameters.f90 
     ${COMPILE_COMMAND} -o $BIN/irt_trackmask_release.x $SRC/irt_trackmask_release.f90 $SRC/irt_parameters.f90 #-no-wrap-margin
-    i++
+#    i++
  fi 
 
  if [ "${!i}" == "cp" ]; then
@@ -23,8 +23,39 @@ COMPILE_COMMAND='gfortran'
     ${COMPILE_COMMAND} -c $SRC/cp_parameters.f90
     cp cp_parameters.mod $BIN/cp_parameters.mod 
     cp cp_parameters.o $BIN/cp_parameters.o
-    #${COMPILE_COMMAND} -fbounds-check -fbacktrace -Wall -Wextra -ggdb -fcheck=all -o  $BIN/tracer_tracking.x $SRC/tracer_tracking.f90 $BIN/cp_parameters.o -L/usr/lib64/gfortran/modules/netcdf.mod -lnetcdf -lnetcdff
     ${COMPILE_COMMAND} -o  $BIN/tracer_tracking.x $SRC/tracer_tracking.f90 $BIN/cp_parameters.o -L/usr/lib64/gfortran/modules/netcdf.mod -lnetcdf -lnetcdff
+
+   # ${COMPILE_COMMAND} -fbounds-check -fbacktrace -Wall -Wextra -ggdb -fcheck=all -o  $BIN/tracer_tracking.x $SRC/tracer_tracking.f90 $BIN/cp_parameters.o -L/usr/lib64/gfortran/modules/netcdf.mod -lnetcdf -lnetcdff
+ fi 
+
+ if [ "${!i}" == "rcnc" ]; then
+    SRC='src/raincell'
+    BIN='bin/raincell'
+    ${COMPILE_COMMAND} -c $SRC/irt_parameters.f90
+    ${COMPILE_COMMAND} -o $BIN/irt_objects_release.x $SRC/irt_objects_releasenc.f90 $SRC/irt_parameters.f90 -L/usr/lib64/gfortran/modules/netcdf.mod -lnetcdf -lnetcdff
+    ${COMPILE_COMMAND} -o $BIN/irt_advection_field_release.x $SRC/irt_advection_field_release.f90 $SRC/irt_parameters.f90
+    ${COMPILE_COMMAND} -o $BIN/irt_tracks_release.x $SRC/irt_tracks_release.f90 $SRC/irt_parameters.f90
+    ${COMPILE_COMMAND} -o $BIN/irt_trackmask_release.x $SRC/irt_trackmask_release.f90 $SRC/irt_parameters.f90 #-no-wrap-margin
+#    i++
+ fi
+
+
+ if [ "${!i}" == "bet" ]; then
+    SRC='src/cp'
+    BIN='bin/cp'
+    ${COMPILE_COMMAND} -c $SRC/cp_parameters_bet.f90
+    cp cp_parameters_bet.mod $BIN/cp_parameters_bet.mod
+    cp cp_parameters_bet.o $BIN/cp_parameters_bet.o
+    ${COMPILE_COMMAND} -o  $BIN/tracer_tracking_bet.x $SRC/tracer_tracking_bet.f90 $BIN/cp_parameters_bet.o -L/usr/lib64/gfortran/modules/netcdf.mod -lnetcdf -lnetcdff
  fi  
 
+if [ "${!i}" == "test" ]; then
+    SRC='src/cp'
+    BIN='bin/cp'
+    ${COMPILE_COMMAND} -c $SRC/cp_parameters.f90
+    cp cp_parameters.mod $BIN/cp_parameters.mod
+    cp cp_parameters.o $BIN/cp_parameters.o
+    ${COMPILE_COMMAND} -o  $BIN/testnc.x $SRC/testnc.f90 $BIN/cp_parameters.o -L/usr/lib64/gfortran/modules/netcdf.mod -lnetcdf -lnetcdff
+    #${COMPILE_COMMAND} -fbounds-check -fbacktrace -Wall -Wextra -ggdb -fcheck=all -o  $BIN/tracer_tracking.x $SRC/tracer_tracking.f90 $BIN/cp_parameters.o -L/usr/lib64/gfortran/modules/netcdf.mod -lnetcdf -lnetcdff
+ fi
 
