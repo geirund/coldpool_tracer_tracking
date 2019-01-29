@@ -50,7 +50,8 @@ outvar = (/ispan(1,na,1),ispan(1,na,1),ispan(1,na,1),ispan(1,na,1)/)
 do i=0,ni-1
   ;get the last object of this track, which is the one which terminates by contributing to a larger one
 print(tIDm(i))
-  oID2m=track(max(ind((track(:,0) .eq. tIDm(i)))),3) ;get the last object of this track, which is the one which terminates by contributing to a larger one
+print(ind((track(:,0) .eq. tIDm(i))))
+   oID2m=track(max(ind((track(:,0) .eq. tIDm(i)))),3) ;get the last object of this track, which is the one which terminates by contributing to a larger one
 ; debug prints
 print("the last object of the merging track "+tIDm(i)+" is"+oID2m)
   ; get into which object this object merges at the next timestep
@@ -85,7 +86,7 @@ do i = 0, na-1  ; na is number of all tracks
   end if
   ; first check if precip event ever reaches size above given trashold ... 
   if any(currentareas .gt. tr)  ; and find first timestep when area is above tr
-    start = min(track(ind(track(:,0) .eq. ta(i) .and. track(:,4) .gt. tr),1)) +1
+    start = min(track(ind(track(:,0) .eq. ta(i) .and. track(:,4) .gt. tr),1)) ;+1
   else ; or find timestep when area reaches its maximum
     startarea := max(track(ind(track(:,0) .eq. ta(i)),4))
     start = min(track(ind(track(:,0) .eq. ta(i) .and. track(:,4) .eq. startarea),1))

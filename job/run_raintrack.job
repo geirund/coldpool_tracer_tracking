@@ -5,8 +5,8 @@
 ##########################
 # SET PATH
 #
-from='test1plus4K_multi'  # only if rain tracking not running because tracer use the same as already traced
-JOBNAME='test1plus4K_neutest' #multismall'  #name shouldnt be too long, improve f90 
+from='test1plus4K_ran5'  # only if rain tracking not running because tracer use the same as already traced
+JOBNAME='test1plus4K_ran7' #multismall'  #name shouldnt be too long, improve f90 
 FIN=$modelo/UCLA_testdata/test1plus4K/level2/test1plus4K_budget.nc # inputfile for precipitation
 INv=/$modelo/UCLA_testdata/test1plus4K/level1/test1plus4K.out.vol.v.nc
 INu=$modelo/UCLA_testdata/test1plus4K/level1/test1plus4K.out.vol.u.nc
@@ -17,12 +17,10 @@ INu=$modelo/UCLA_testdata/test1plus4K/level1/test1plus4K.out.vol.u.nc
 #INv=/nbi/ac/conv1/henneb/Moseley2018/data/lind_p2K/lind_p2K.out.vol.v.nc
 #INu=/nbi/ac/conv1/henneb/Moseley2018/data/lind_p2K/lind_p2K.out.vol.u.nc
 
-lformat=svn
-
 OUT=/nbi/ac/conv1/henneb/results/coldpool/${JOBNAME}/
 
 ## SET PARAMETER
-cutoff=0.1 # Gesa 1.0                        # cut off for precip (mm/s)
+cutoff=1.0                        # cut off for precip (mm/s)
 mincellsize=10.                              # minimum rain cell size, use 3 strings
 trackstartsize=30.                           # minimum size when trac starts
 mintracersize=50.                            # minimum size for tracer tracking 
@@ -30,13 +28,15 @@ domsizex=320 #1024 #  #todo: needs to be changed as input in rain tracking
 domsizey=320 #1024 #
 dt=300
 res=200
-tracer=90 # 120 #100
-ntsets=3                                          # number of timesteps at which tracers are set after precip start
-alltracer=360 #600 # `expr ${ntracer} * ${ntsets}`
+tracer=100 # 120 #100
+ntsets=2                                          # number of timesteps at which tracers are set after precip start
+alltracer=300 #(nsets +1) *tracer #600 # `expr ${ntracer} * ${ntsets}`
+
 # alltracer=$((ntracer * ntsets))
-age=30 #30
+age=20 #30
 rad=True
-lformat=nc #svn
+lformat=srv #nc #srv
+lirt="copy" #"run" #'copy' 
 #########################
 ### MAKE NAMELIST 
 ########################
@@ -84,38 +84,48 @@ fi
 #####################################################
 ### run_tracking
 #####################################################
-./bin/raincell/irt_objects_release.x 1
-./bin/raincell/irt_advection_field_release.x
-./bin/raincell/irt_tracks_release.x
-sort -n -k2 ${OUT}/output/raincell/irt_tracks_nohead_output.txt > ${OUT}/output/raincell/irt_tracks_sorted.txt
-./bin/raincell/irt_trackmask_release.x
+if [ $lirt == "run" ]; then
+  ./bin/raincell/irt_objects_release.x 1
+  ./bin/raincell/irt_advection_field_release.x
+  ./bin/raincell/irt_tracks_release.x
+  sort -n -k2 ${OUT}/output/raincell/irt_tracks_nohead_output.txt > ${OUT}/output/raincell/irt_tracks_sorted.txt
+  ./bin/raincell/irt_trackmask_release.x
 
-cdo -f nc copy ${OUT}/output/raincell/irt_objects_mask.srv ${OUT}/output/raincell/irt_objects_mask.nc
-cdo -f nc copy ${OUT}/output/raincell/irt_tracks_mask.srv ${OUT}/output/raincell/irt_tracks_mask.nc
-!ncl path=\"${OUT}/output/raincell/\" bin/fill_tracks.ncl
+  cdo -f nc copy ${OUT}/output/raincell/irt_objects_mask.srv ${OUT}/output/raincell/irt_objects_mask.nc
+  cdo -f nc copy ${OUT}/output/raincell/irt_tracks_mask.srv ${OUT}/output/raincell/irt_tracks_mask.nc
+  ncl path=\"${OUT}/output/raincell/\" bin/fill_tracks.ncl
 
 ###################################################
 # prepare input for cold pool tracking 
 ##################################################
 #
-./bin/cut.bsh ${OUT} # cuts the header and body to separate files
-sort -n -k2 ${OUT}/output/raincell/headerfile.txt > ${OUT}/input/cp/irt_tracks_header_sorted.txt
+  ./bin/cut.bsh ${OUT} # cuts the header and body to separate files
+  sort -n -k2 ${OUT}/output/raincell/headerfile.txt > ${OUT}/input/cp/irt_tracks_header_sorted.txt
+  sort -n -k2 ${OUT}/output/raincell/irt_tracks_output_pure.txt > ${OUT}/output/raincell/irt_tracks_output_pure_sort.txt
 
+fi 
 # now with srv cdo sellevel,50 ${INv} input/cp/input_v.nc
 # now with srv cdo sellevel,50 ${INu} input/cp/input_u.nc
+#cdo sellevel,50 ${INv} ${OUT}/input/cp/input_v.nc
+#cdo sellevel,50 ${INu} ${OUT}/input/cp/input_u.nc
+
+#ncrename -O -v u,U ${OUT}/input/cp/input_u.nc
+#ncrename -O -v v,V ${OUT}/input/cp/input_v.nc
+
+
+
 cdo -f srv sellevel,50 ${INv} ${OUT}/input/cp/input_v.srv
 cdo -f srv sellevel,50 ${INu} ${OUT}/input/cp/input_u.srv
 #
 #
-sort -n -k2 ${OUT}/output/raincell/irt_tracks_output_pure.txt > ${OUT}/output/raincell/irt_tracks_output_pure_sort.txt
 ####################################################
 ## or copy from another experiment with same simulation
 ###################################################
+if [ $lirt == "copy" ]; then
+  rsync -r $OUT/../${from}/output/raincell $OUT/output/.
+  rsync -r $OUT/../${from}/input/cp $OUT/input/.
+fi 
 
-#rsync -r $OUT/../${from}/output/raincell $OUT/output/.
-#rsync -r $OUT/../${from}/input/cp $OUT/input/.
-##
-##
 ncl path=\"${OUT}\" tr=${trackstartsize} tr2=${mintracersize} dx=${domsizex} dy=${domsizey} bin/merger.ncl #makes list of merging cold pools for special treatment
 sort -n -k2 ${OUT}/output/raincell/irt_tracks_output_pure.txt > ${OUT}/input/cp/tracks_body_time_sorted.txt
 #

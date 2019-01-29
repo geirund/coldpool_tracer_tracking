@@ -20,9 +20,9 @@ REAL, ALLOCATABLE    :: out_field(:,:)
 
 INTEGER              :: srv_header(8)
 
-CHARACTER (len=90)   :: input_filename1 
-CHARACTER (len=90)   :: input_filename2 
-CHARACTER (len=90)   :: output_filename 
+CHARACTER (len=200)   :: input_filename1 
+CHARACTER (len=200)   :: input_filename2 
+CHARACTER (len=200)   :: output_filename 
 
 ! GET NAMELIST INPUT
 namelist /INPUTgeneral/ dsize_x, dsize_y,dt,res

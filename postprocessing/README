@@ -1,0 +1,67 @@
+Order of running programms:
+ - cppython_simple.py
+ - cppython_simple_part2.py
+ - tracking of TWP
+ - timedelay_precip_inition.py
+ - closestCPs.py
+___________________________________________
+Programs:                               
+creating data:                          
+ _______________________________
+1. cppython_simple.py
+- uses: 
+  - coldpool_tracer_out.txt (reuslts from tracer tracking)
+  - classes TRACER, CP_map, CPstart
+
+- creates 
+  - Tracer.save 
+  - TracerMap.save  which tracer is at t,x,y as key
+  - CPstart.save
+____________________________________
+2. cppython_simple_part2.py
+- uses
+  - TracerMap.save
+  - classes CP_map, COL, CPlife, 
+- create :
+  - CPlife.save information about CP, # of gp distributed over, 
+     CPs collided with .. 
+#  - colli.save some collision information with key collision combination
+________________________________________
+3. timedelay_precip_inition.py
+- prepartion
+  - run rain tracking for twp
+  - classes RAINCLOUD  
+- uses
+  - irt_tracks_mask.nc precip 
+  - irt_tracks_output_pure_sort.txt precip
+  - irt_tracks_mask.nc twp
+  - irt_tracks_output_pure_sort.txt twp  
+  - mergingCPs.txt
+
+- creates:
+  - timedelay.save  timedelay between beginning of twp object to beginning of
+    precipitation object and beginning of cold pool (setting of tracer)
+  - figure of timedelay and precipitation intensity
+_______________________________________
+4. closestCPs.py
+- uses
+ - /output/cp/CPstart.save
+ - /output/cp/TracerMap.save
+ - timedelay.save  
+ - /output/cp/Tracer.save
+ - mergingCPs.txt
+ - classes TRACEr, CP_map, CPstart, RAINCLOUD
+
+- creates
+ - Parents.save
+ - Kidstest.save 
+
+- run with closest > destination/output .. to save print statements
+
+using data:
+controll_data.py
+
+_______________________________________
+4. CPs.py
+- plots individual CPs
+

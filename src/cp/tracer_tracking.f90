@@ -1230,29 +1230,21 @@ SUBROUTINE setongrid(traced_dummy,map,map2,CPID,cogx,cogy,counter2)
 USE cp_parameters, ONLY : dsize_x, dsize_y, max_tracer_CP
   INTEGER,INTENT(INOUT) :: map(dsize_x, dsize_y),map2(dsize_x, dsize_y)
   INTEGER               :: maptr(dsize_x, dsize_y),maptr2(dsize_x, dsize_y),maptr3(dsize_x, dsize_y) 
-  INTEGER               :: maptr4(dsize_x, dsize_y),maptr5(dsize_x,dsize_y),maptr6(dsize_x, dsize_y)
-
   INTEGER, INTENT(IN)      ::  CPID
   REAL, INTENT(IN) :: traced_dummy(max_tracer_CP,20)
   REAL :: dum(max_tracer_CP,20), dumdum(max_tracer_CP,20)
   REAL, INTENT(IN) :: cogx, cogy
   INTEGER :: i,j,jsave,k, l
-  INTEGER ::ii,ij,jj,nn, deltax,deltay,dx, dy, ix, iy,oldx,c,oldy,nx,ny,x,y,xtemp,ytemp,xp,yp
-  INTEGER,ALLOCATABLE :: feld(:,:)
-  REAL,ALLOCATABLE :: feldr(:,:)
-  REAL :: pi, newphi, s, phi,phiold, phitemp, centerx, centery
+  INTEGER ::ii,ij,jj, deltax,deltay,dx, dy, ix, iy,oldx,c,oldy,nx,ny,x,y,xtemp,ytemp,xp,yp
+  REAL :: pi,  s, centerx, centery
   INTEGER :: d, cc, mapmap(dsize_x, dsize_y), checker, counter
-  REAL :: mapphi(dsize_x, dsize_y)
-  INTEGER :: mapno(dsize_x, dsize_y)
   INTEGER, INTENT(OUT) :: counter2
   REAL :: rsave
-  INTEGER, ALLOCATABLE :: shiftx(:),shifty(:)
   REAL :: dist, distnew
-  INTEGER ::nextracer, noneig, jp, startc, step1, step2
-  INTEGER :: savei, stopper
+  INTEGER ::nextracer, startc
+  INTEGER :: savei
   INTEGER :: firstx, firsty
-  INTEGER :: ixs(4), iys(4)
-  Integer :: tempmap(dsize_x,dsize_y)
+
   write(*,*) 'CP', CPID
   checker = 0
   counter2 = 0
@@ -1271,7 +1263,6 @@ USE cp_parameters, ONLY : dsize_x, dsize_y, max_tracer_CP
   maptr(:,:) = 0
   maptr2(:,:) = 0
   maptr3(:,:) = 0
-  maptr4(:,:) = 0
 
 !  do ix=1,dsize_x
 !   do iy=1,dsize_y
@@ -1305,18 +1296,19 @@ USE cp_parameters, ONLY : dsize_x, dsize_y, max_tracer_CP
     oldy = mod(int(dum(c-1,4))-1+deltay+dsize_y,dsize_y)+1
     firstx = oldx  ! gp to which gap is closed the first time
     firsty = oldy
+
     DO WHILE (i .lt. c+1) !max_tracer_CP
       if (i .lt. savei) then 
         ! close circle and get out 
         x = mod(int(dum(i,3))-1+deltax+dsize_x,dsize_x)+1
         y = mod(int(dum(i,4))-1+deltay+dsize_y,dsize_y)+1
-        ! fill  from the previous to the current,which has passed the "end of the
-        ! circle" 
-        CALL filltracer(oldx, oldy,x,y,maptr, maptr2,maptr3, CPID, &
-                     centerx, centery, counter, checker)
-        ! and fill from current to the first one
-        CALL filltracer(x,y,firstx, firsty, maptr, maptr2,maptr3, CPID, &
-                     centerx, centery, counter, checker)
+!        ! fill  from the previous to the current,which has passed the "end of the
+!        ! circle" 
+!        CALL filltracer(oldx, oldy,x,y,maptr, maptr2,maptr3, CPID, &
+!                     centerx, centery, counter, checker)
+!        ! and fill from current to the first one
+!        CALL filltracer(x,y,firstx, firsty, maptr, maptr2,maptr3, CPID, &
+!                     centerx, centery, counter, checker)
         goto 1288
       end if
       savei = i
@@ -1384,86 +1376,29 @@ USE cp_parameters, ONLY : dsize_x, dsize_y, max_tracer_CP
                      centerx, centery, counter, checker)
 
       1288 CONTINUE
-  ii = centerx !dsize_x/2
-  jj = centery !dsize_y/2
+ii = centerx
+ij = centery
 !!  d = 1
-!  write(*,*) ii,jj
-  tempmap(:,:) = 0
-!  maptr2 = maptr
   maptr3 = maptr2
   maptr2 = maptr
-  do ix=1,dsize_x
-   do iy= 1,dsize_y 
-     ixs = (/mod(ix-2+dsize_x,dsize_x)+1, &
-            mod(ix   +dsize_x,dsize_x)+1,    &
-            ix, ix/)
-     iys = (/iy,iy,&
-           mod(iy-2+dsize_y,dsize_y)+1, &
-           mod(iy  +dsize_y,dsize_y) +1/)
-     do k=1,4 
-       if (maptr(ixs(k),iys(k)) .eq. CPID) tempmap(ix,iy) = 1 
-     end do
-   end do
-  end do
+
   d = 0
-!  write(*,*) 'before'
-!  iy = centery
-!  ix = centerx
-!  do while (maptr3(ix,iy) .eq. 0)
-!    ix = ix -1
-!    if (ix .eq. 0) goto 2801 !from center to domain boundary
-!  end do
-!  ix = ix+1
-!  do while (maptr3(ix,iy) .eq. 0)
-!    iy = iy-1
-!    if (iy .eq. 0) goto 2801
-!  end do
-!  do while (maptr3(ix,iy) .eq. 0)
-!    iy = iy-1
-!    if (iy .eq. 0) goto 2801
-!  end do
 
-!!! 
-! large objects exceed stack size 
-! either set some tracers already or make it step wise
-!  maptr3(centerx-50,centery-50:centery+50) = -20
-!  maptr3(centerx+50,centery-50:centery+50) = -20
-!  maptr3(centerx-50:centerx+50,centery-50) = -20
-!  maptr3(centerx-50:centerx+50,centery+50) = -20
-  maptr4 = maptr 
-  CALL getobj(maptr3,CPID,maptr,ii,jj,d,stopper,maptr4)
-  maptr = maptr4
- ! if (stopper .eq. 100) maptr(:,:) = maptr2
- ! write(*,*) stopper
- ! if ( ALL( maptr==CPID ) ) then
- !   maptr(:,:) = maptr2
- ! end if
+  CALL getobj(maptr3,CPID,maptr,ii,ij,d)
 
-  CALL getobj(maptr3,CPID,maptr,ii,jj,d,stopper,maptr4)
-  maptr = maptr4
-!  write(*,*) 'for',CPID,'d is ',d 
-!  if (stopper .eq. 100) maptr(:,:) = maptr2
-!  write(*,*) stopper
-!  if ( ALL( maptr==CPID ) ) then
-!    maptr(:,:) = maptr2
-!  end if
+! if object exceed domain boundaries, all gp are filled and map needs to be set
+! back to outlines
+  if ( ALL( maptr==CPID ) ) then
+    maptr(:,:) = maptr2
+  end if
 
-  CALL getobj(maptr3,CPID,maptr,ii,jj,d,stopper,maptr4)
-  maptr = maptr4
+! not neccessary any more
+!  if (ANY(maptr(1:2,:) .eq. CPID)) maptr(:,:) = maptr2
+!  if (ANY(maptr(dsize_x-2:dsize_x,:) .eq. CPID)) maptr(:,:) = maptr2
+!  if (ANY(maptr(:,1:2) .eq. CPID)) maptr(:,:) = maptr2
+!  if (ANY(maptr(:,dsize_y-2:dsize_y) .eq. CPID)) maptr(:,:) = maptr2
 
-  CALL getobj(maptr3,CPID,maptr,ii,jj,d,stopper,maptr4)
-  maptr = maptr4
-   
-  if (ANY(maptr(1:2,:) .eq. CPID)) maptr(:,:) = maptr2
-  if (ANY(maptr(dsize_x-2:dsize_x,:) .eq. CPID)) maptr(:,:) = maptr2
-  if (ANY(maptr(:,1:2) .eq. CPID)) maptr(:,:) = maptr2
-  if (ANY(maptr(:,dsize_y-2:dsize_y) .eq. CPID)) maptr(:,:) = maptr2
-
-
-  !if (d .lt. 2) maptr(:,:) = maptr2
-!  2801 CONTINUE
-  
-!  write(*,*) 'after'
+! just to controll where centers are placed
   maptr2(centerx,centery) = -2
   maptr2(dsize_x/2,dsize_y/2) = -4
 
@@ -1486,8 +1421,6 @@ USE cp_parameters, ONLY : dsize_x, dsize_y, max_tracer_CP
   end do
  end if 
 
-!! DEALLOCATE(feld)
-!! DEALLOCATE(feldr)
 END SUBROUTINE setongrid
 
 !------------------
@@ -1505,7 +1438,7 @@ INTEGER, INTENT(INOUT) :: counter, checker
 INTEGER :: xtemp, ytemp, dx, dy
   xtemp = startx
   ytemp = starty
-  do while ( xtemp .ne. x .or. ytemp .ne. y)
+  do while (xtemp .ne. x .or. ytemp .ne. y)
     dx = xtemp-x
     dy = ytemp-y
     if (abs(dx) .gt. abs(dy)) then
@@ -1542,8 +1475,11 @@ INTEGER :: xtemp, ytemp, dx, dy
   end do
 END SUBROUTINE filltracer
 
-
-RECURSIVE SUBROUTINE getobj(objectin,CPID,objectout,ii,ij,c,stopper,mapout)
+!----------------------------------------------
+! identifies all gp within an outline starting 
+! at a given center
+!----------------------------------------------
+RECURSIVE SUBROUTINE getobj(objectin,CPID,objectout,ii,ij,c)
 USE cp_parameters, ONLY : dsize_x, dsize_y, max_tracer_CP
   INTEGER, INTENT(IN) :: objectin(dsize_x, dsize_y)
   INTEGER, INTENT(IN) :: CPID
@@ -1553,79 +1489,46 @@ USE cp_parameters, ONLY : dsize_x, dsize_y, max_tracer_CP
   INTEGER, INTENT(INOUT) :: c
   INTEGER :: z
   INTEGER :: ii_mod, ij_mod
-  INTEGER, INTENT(OUT) :: stopper
-  INTEGER, INTENT(INOUT) :: mapout(dsize_x,dsize_y)
+
+  ! gridpoint shifts
   icell = (/ ii+1, ii  , ii-1, ii  /)
   jcell = (/ ij  , ij+1, ij  , ij-1 /)
   ii_mod = mod(ii-1+dsize_x,dsize_x) + 1
   ij_mod = mod(ij-1+dsize_y,dsize_y)+ 1
 
-!  CAll WRITEMAP(objectout,c,"object_step")
-!  if (ii .lt. 2) write(*,*) ii, '.lt.2 got to 200'
-!  if (ij .lt. 2) write(*,*) ij, '.lt.2 got to 200'
-!  if (ii .gt. dsize_x-2) write(*,*) ii, '.gt. dsozex got to 200'
-!  if (ij .gt. dsize_y-2) write(*,*) ij, '.gt. dsize y got to 200'
-!  if (ii .lt. 2) goto 200
-!  if (ij .lt. 2) goto 200
-!  if (ii .gt. dsize_x-2) goto 200
-!  if (ij .gt. dsize_y-2) goto 200
+! avoid to loop unneccessarily often when boundaries are hit, what 
+! happens when center is outside of the outline
+
+  if (ii .lt. 2) goto 200
+  if (ij .lt. 2) goto 200
+  if (ii .gt. dsize_x-2) goto 200
+  if (ij .gt. dsize_y-2) goto 200
 
  
-!  write(*,*), 'at', c,ii,ij
-!  write(*,*) objectin(ii_mod,ij_mod), CPID, objectout(ii_mod,ij_mod), dsize_x
-
   IF (objectout(ii_mod,ij_mod) .ne. CPID) then
     objectout(ii_mod,ij_mod) = CPID
-    mapout(ii_mod,ij_mod) = CPID
     IF (objectin(ii_mod,ij_mod) .ne. -2) then
-    IF (objectin(ii_mod,ij_mod) .ne. -20) then
-
-!write(*,*) objectin(ii,ij),'object in for CPID', CPID, z
       DO z = 1,4
-       if (c .gt. 10000) then 
-         goto 200
-       else
-         stopper = 0
-       end if
+!        if (c .gt. 10000)  goto 200
         c = c+1 
-        if (CPID .eq. 227) write(*,*) 'c', c
-        if (CPID .eq. 17) write(*,*) 'c', c
 
-!         write(*,*) z, icell(z),jcell(z)
-!        if (icell(z) .lt. 2) goto 200
-!        if (jcell(z) .lt. 2) goto 200
-!        if (icell(z) .gt. dsize_x-2) goto 200
-!        if (jcell(z) .gt. dsize_y-2) goto 200
-
-        CALL getobj(objectin,CPID,objectout,icell(z),jcell(z),c,stopper,mapout)
-!        CALL getobj(objectin,CPID,objectout,&
-!                   od(icell(z)-1+dsize_x,dsize_x)+1,mod(jcell(z)-1+dsize_y,dsize_y)+1,c)
-!        CAll WRITEMAP(objectout,c,"object_step")
-
+        CALL getobj(objectin,CPID,objectout,icell(z),jcell(z),c)
       END DO
     ELSE
-!!      i = mod(i-1,4) +1 
+
+! if boundary of cell was found, must go back to previous gp not to jump over
+! the boundaries when proceed searching from a bundoury point
       IF (z .eq. 1) icell(1) = icell(1)-1
       IF (z .eq. 2)  jcell(2) = jcell(2) -1
       IF (z .eq. 3)  icell(3) = icell(3) +1
       IF (z .eq. 4)  jcell(4) = jcell(4) + 1
     END IF
-    END IF
   END IF
 goto 100
+! if domain boundary was hit, set all gps to ID, what terminates the routine
 200 CONTINUE
 c = 0 
 objectout(:,:) = CPID
-stopper = 100
-write(*,*) c
-goto 100
-!300 CONTINUE
-!c = 0
-!objectout(:,:) = CPID
-!stopper = 200
-
-!write(*,*) 'center outside, object cant be identified'
-! set object 0
 100 CONTINUE
 END SUBROUTINE getobj
 ! --------------------------------------------------------------------------------------
