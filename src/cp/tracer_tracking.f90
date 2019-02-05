@@ -1,3 +1,9 @@
+!TODOES!!
+! - when a precip has merged into another, change its ID 
+! - fix if CP has a continues line trough its self (happens when merging eg CP
+! - INCLUDE CONSTRAIN THAT NEXT CLOSER cp MUST HAVE LARGER RADIUS THAN THE ONE
+! WHICH WAS SKIPPED
+! 41 in small data set
 ! 2018 Sep 08 O Henneb
 ! read rain tracking output txt for COGs (loop trough every line)
 ! read 2D velocity field (time-stepwise)
@@ -36,6 +42,38 @@
 ! 2018 Dec
 ! set tracer at multiple times
 !
+! 2019 Jan:
+! set tracer at the outline of precip events, but with a fix number at every
+! timestep; therefore if given number of tracers to be set less than precip
+! outline, tracers are placed randomly at the outline, no gp is occupied twice,
+! else after placing a tracer at every outline second round of tracers are set
+! randomly with a random shift within the already occupied grid box
+!
+! outlines and objects of CPs are identified:
+! tracers are sorted by angle btw x-Axis and conection line to COG. 
+! for every CP the domain is shifted in a way that the COG of the CP is the
+! center of the domain, and shifted back after idenntification.
+! its started with tracer with largest radius, gp of follwing tracers are marked
+! as occupied as long as they are neighbouring gp, else the distance to the
+! next tracer is calculated and searched for a closer one within the next x
+! follwing tracers. gp inbetween will be connected, all tracers from the current
+! to the next closest are ignored for the outline. Simultanously the center of
+! all the outliner gp is calculated
+! after having a closed circumference of the CP, gp are filled inside, recursiv
+! starting from the caclulated center. If the center is outside, the recursion
+! has to pass a the domain boundaries and is imediatly aborted. No object is
+! identified in that case. This could be changed to identify the area outside of
+! the object and flip inside ot afterwards
+!
+! CPs are terminated when their area reduces to 80% of the maximum size
+!
+! 2019 Feb
+! additional condition for object identification, if tracers are skipped, the
+! next chosen must have a larger radius than the current
+! coldpools terminate when they reduce in sice for two timesteps (smaller than
+! 0.8 * max size
+! CParea overwrites previous CPs if they are older
+!
 ! OUTPUT: 
 ! traced(CP-ID,int tracer ID, property) 
 ! traced(:,:, 1)   x pos of tracer 
@@ -67,7 +105,7 @@ USE cp_parameters !, ONLY: dsize_x, dsize_y, max_tracer_CP, dt ! &
 IMPLICIT NONE
 REAL, ALLOCATABLE    :: input_field(:,:)      ! eg precip field to find COGs
 REAL, ALLOCATABLE    :: vel(:,:,:)               ! velocity field
-REAL, ALLOCATABLE    :: nneighb(:,:)             ! identifier for cell boundaries
+INTEGER, ALLOCATABLE :: nneighb(:,:)             ! identifier for cell boundaries
 REAL, ALLOCATABLE    :: COMx(:), COMy(:)         ! store COG
 REAL, ALLOCATABLE    :: rmax(:)                  ! area of precip
 !INTEGER, ALLOCATABLE :: IDstart(:)               ! first timestep of precip 
@@ -75,12 +113,14 @@ REAL, ALLOCATABLE    :: track_numbers(:,:)       ! ID for precip and coldpoolsob
 INTEGER, ALLOCATABLE :: already_tracked(:)       ! memory of cell counter
 REAL, ALLOCATABLE    :: traced(:,:,:)            ! traced information, CP ID x internal tarcer ID x properties
 REAL, ALLOCATABLE    :: traced_dummy(:,:)        ! dummy to sort tracer by angle
-REAL, ALLOCATABLE    :: traced_prev(:,:,:)       ! traced information from previous timestep 
+REAL, ALLOCATABLE    :: traced_prev1(:,:,:)       ! traced information from previous timestep 
+REAL, ALLOCATABLE    :: traced_prev2(:,:,:)       ! traced information fromprevious timestep 
+
 INTEGER,ALLOCATABLE  :: cpio(:,:)                ! to identify merger (dim1) and start time (dim2) splitting events have start time 0 to avoid them
 INTEGER              :: ID                       ! local ID from rain track
 INTEGER              :: tts                      ! timestep
-!REAL                 :: areain                   ! size of precip cell
-INTEGER              :: i                        ! running index
+!REAL                 :: areain                  ! size of precip cell
+INTEGER              :: i,ix,iy                  ! running index
 INTEGER              :: ierr                     ! error index for reading files
 REAL                 :: xCOG, yCOG               ! buffer variable for read COGs
 INTEGER              :: onset,begin              ! first cell reaches treshold, beginning of tracking
@@ -93,12 +133,13 @@ INTEGER              :: timestep
 !INTEGER              :: ntracer
 INTEGER              :: count_tracer             ! counts the internal tracer in an individual CP
 INTEGER, ALLOCATABLE :: map(:,:,:)
-INTEGER,ALLOCATABLE  :: active_CP(:)
+INTEGER, ALLOCATABLE :: active_CP(:)             ! 
+INTEGER, ALLOCATABLE :: inactiveCP(:)            ! stops tracer, when CP fulfills inactivty criteria for two timesteps
+INTEGER, ALLOCATABLE :: CPinfo(:,:)                 ! age ...
 INTEGER,ALLOCATABLE  :: CPsize(:,:)
 INTEGER, ALLOCATABLE :: prec_active(:,:)
-INTEGER, ALLOCATABLE :: CPsets(:,:,:)
-INTEGER, ALLOCATABLE :: counter(:), grdpnts(:,:)
-integer :: j
+INTEGER, ALLOCATABLE :: CPsets(:,:,:,:)
+INTEGER, ALLOCATABLE :: counter(:,:), grdpnts(:,:)
 !INITIALIZE some values
 namelist /INPUTgeneral/ dsize_x, dsize_y, dt, res
 namelist /INPUTtracer/ max_tracer_CP, nTrSet, ntset, max_age, rad, lformat
@@ -120,14 +161,17 @@ write(*,*) "max_tracers", max_tracers, "max_no_of_cells", max_no_of_cells, "max_
 ALLOCATE(cpio(max_no_of_cells,3))
 ALLOCATE(traced(max_no_of_cells,max_tracer_CP,20))
 ALLOCATE(traced_dummy(max_tracer_CP,20))
-ALLOCATE(traced_prev(max_no_of_cells,max_tracer_CP,20))
+ALLOCATE(traced_prev1(max_no_of_cells,max_tracer_CP,20))
+ALLOCATE(traced_prev2(max_no_of_cells,max_tracer_CP,20))
 !ALLOCATE(IDstart(max_no_of_cells))
 ALLOCATE(COMx(max_no_of_cells))
 ALLOCATE(COMy(max_no_of_cells))
 ALLOCATE(CPsize(max_no_of_cells,max_age+1))
 ALLOCATE(prec_active(max_no_of_cells,2))
 ALLOCATE(rmax(max_no_of_cells))
+ALLOCATE(inactiveCP(max_no_of_cells))
 ALLOCATE(active_CP(max_no_of_cells))
+ALLOCATE(CPinfo(max_no_of_cells,4))
 ALLOCATE(vel(dsize_x,dsize_y,2))
 ALLOCATE(track_numbers(dsize_x,dsize_y))
 ALLOCATE(nneighb(dsize_x,dsize_y))
@@ -136,11 +180,12 @@ ALLOCATE(input_field(dsize_x,dsize_y))
 ALLOCATE(tracpo(2,max_tracers))
 ALLOCATE(map(dsize_x,dsize_y,2))
 ALLOCATE(grdpnts(2,dsize_x*dsize_y))
-ALLOCATE(counter(max_no_of_cells))
-ALLOCATE(CPsets(max_no_of_cells,nTrSet,2))
+ALLOCATE(counter(max_no_of_cells,2))
+ALLOCATE(CPsets(max_no_of_cells,nTrSet,2,2))
 ! initialize arrays
 map(:,:,:) = 0
 active_cp(:) = 0
+inactiveCP(:) = 0
 write(*,*) 'start random fnc'
 CALL randomgrid(grdpnts)
 write(*,*) 'finished random fnc'
@@ -171,11 +216,12 @@ write(*,*) i, 'rain cells found'
 !INITIALIZE some values
 already_tracked(:) = 0
 traced(:,:,:) = 0.
-traced_prev(:,:,:) = 0.
+traced_prev1(:,:,:) = 0.
+traced_prev2(:,:,:) = 0.
 count_tracer = 0 ! counts individual pixels !OCH was ist mit pixeln gemeint? der
 !IDstart(:) = 0
 timestep=0 
-prec_active(:,2) = 1
+prec_active(:,2) = 0
 prec_active(:,1) = 0
 ! read when first precip is tracked
  OPEN(3,FILE=trim(odir) // '/input/cp/tracks_body_time_sorted.txt',FORM='formatted',ACTION='read')
@@ -189,13 +235,15 @@ prec_active(:,1) = 0
 
  DO !start main loop
 ! runs until all timesteps are read, or uncomment lines below
-! IF (timestep .ge. 150) THEN !maxval(cpio(:,3),1)) then
+! IF (timestep .ge. 155) THEN !maxval(cpio(:,3),1)) then
 ! GOTO 5000
 ! END IF 
 ! only for testing
+   prec_active(:,1) = 0 ! set all  rain cells inactive, only when read again
+                        !they are still active
    timestep=timestep+1
   write(*,*) 'at timestep', timestep
- 
+  write(*,*) 'controll', traced(72,(/1,500/),1)  
    !if (IDstart(ID) .eq. 0) IDstart(ID) = cpio(ID,3) !new CP 
    track_numbers(:,:)=0 
 
@@ -218,13 +266,14 @@ prec_active(:,1) = 0
      ! or previously read 
      COMx(ID) = xCOG
      COMy(ID) = yCOG
+     prec_active(ID,1) = 1
      !area(ID) = areain
      DO WHILE (tts .eq. timestep ) !as long as CPs at the same tiemstep are read
        READ(3,153,END=200)  ID, tts, xCOG,yCOG ! read next line 
-       prec_active(ID,1) = 1
        IF (tts .eq. timestep ) THEN ! and store COG if still at the same timestep
          COMx(ID) = xCOG
          COMy(ID) = yCOG
+         prec_active(ID,1) = 1
          !area(ID) = areain
        END IF
        ! now the next timestep is already read
@@ -244,7 +293,7 @@ prec_active(:,1) = 0
        CALL neigh2(track_numbers,max_no_of_cells,grdpnts,CPsets,counter) 
       ! this routine might be rewriten that it can be called in set_tracer
        CALL set_tracer2(max_no_of_cells,cpio,traced,count_tracer,counter,CPsets,&
-                        timestep,active_CP,tracpo,max_tracers,already_tracked)
+                        timestep,active_CP,tracpo,max_tracers,already_tracked,CPinfo)
        !CALL neigh(track_numbers,nneighb)
        !CALL set_tracer(nneighb, track_numbers,max_no_of_cells, timestep,traced,&
        !            count_tracer,already_tracked,tracpo,max_tracers,cpio(:,1:2))
@@ -263,7 +312,11 @@ prec_active(:,1) = 0
                           max_no_of_cells,tracpo,max_tracers)
   
        DO i =1,max_no_of_cells ! loop trough all cps with tracer
-         IF (traced(i,1,11) .eq. 1) then !already_tracked(i) .gt. 1 ) THEN
+         if (prec_active(i,1) .eq. 0 & ! precip has terminated
+             .and. cpio(i,1) .ne. cpio(i,2)) then ! its a merger
+            traced(i,:,9) = cpio(i,2) ! switch tracer id to where they merge into 
+         end if
+         IF (int(traced(i,1,11)) .eq. 1) then !already_tracked(i) .gt. 1 ) THEN
 !  !       ! reset dummy first
            traced_dummy(:,:) = 0.
            traced_dummy = traced(i,:,:)
@@ -272,32 +325,60 @@ prec_active(:,1) = 0
   !           !CALL oneside(traced_dummy(1:already_tracked(i),8),traced(i,:,:),already_tracked(i))
   !!         end if
            IF (traced(i,1,7) .lt. max_age) then
-             CALL setongrid(traced_dummy,map(:,:,1),map(:,:,2),i,COMx(i),COMy(i),CPsize(i,int(traced(i,1,7)+1)))
-!             IF (prec_active(ID,1) .eq. 0 .and. traced(i,1,7) .gt. 2) then ! precipitation has terminates 
-!             IF ( traced(i,1,7) .gt. 2) then ! precipitation has terminates 
-!               IF (CPsize(i,int(traced(i,1,7)+1)) .lt. 0.8*maxval(CPsize(i,:)))  then 
-!                 traced(i,:,11) = 0  ! set cold pool inactive
-!                 write(*,*) 'set ', i,'inactive'
-!               END IF
-!             END IF 
+             CALL setongrid(traced_dummy,map(:,:,1),map(:,:,2),int(traced(i,1,9)) &
+                            ,COMx(i),COMy(i)&
+                            , CPinfo, max_no_of_cells,already_tracked(i))
+             !IF (prec_active(ID,1) .eq. 0 .and. traced(i,1,7) .gt. 2) then ! precipitation has terminates 
+             !END IF 
            END IF
-         !ELSE
-         !  write(*,*) i ,'is inactive' 
          END IF
        END DO
-       CAll WRITEMAP(map(:,:,1),timestep,trim(odir) // '/output/cp/object')
-       CAll WRITEMAP(map(:,:,2),timestep,trim(odir) // '/output/cp/tracer')
+       do ix =1, dsize_x
+         do iy =1,dsize_y
+           if (map(ix,iy,1) .ne. 0 ) then
+             if (int(traced(map(ix,iy,1),1,7)) .gt. 30) then 
+               !write(*,*) map(ix,iy,1) , 'is', int(traced(map(ix,iy,1),1,7))
+               traced(map(ix,iy,1),:,11) = 0
+             else
+               CPsize(map(ix,iy,1),int(traced(map(ix,iy,1),1,7)+1)) = CPsize(map(ix,iy,1),int(traced(map(ix,iy,1),1,7)+1))+1 
+             end if
+           end if
+         end do
+       end do
+       do i =1,max_no_of_cells
+         IF ( traced(i,1,7) .gt. 2) then ! age
+          IF ( traced(i,1,7) .gt. 30) then 
+           traced(i,:,11) = 0
+          ELSE 
+           IF (CPsize(i,int(traced(i,1,7)+1)) .lt. 0.6*maxval(CPsize(i,:)))  then
+                  inactiveCP(int(traced(i,1,9))) = inactiveCP(int(traced(i,1,9))) +1
+                  if (inactiveCP(int(traced(i,1,9))) .eq. 2) then
+                    traced(i,:,11) = 0  ! set cold pool inactive
+                    write(*,*) 'set ', i,'inactive at an age of ', traced(i,1,7)
+                  end if
+           END IF
+           IF (CPsize(i,int(traced(i,1,7)+1)) .lt. 50) then 
+             traced(i,:,11) = 0  ! set cold pool inactive
+           END IF
+          END IF
+         END IF
+       end do 
+      CAll WRITEMAP(map(:,:,1),timestep,trim(odir) // '/output/cp/object')
+      CAll WRITEMAP(map(:,:,2),timestep,trim(odir) // '/output/cp/tracer')
 
        !CALL time_dev(traced,traced_prev,max_no_of_cells,max_tracer_CP,count_tracer,tracpo,max_tracers)
-       !traced_prev = traced
-
+       if (timestep .ge. onset+1) then 
        CALL write_output(traced,max_tracers,count_tracer,timestep,tracpo,&
-                         max_no_of_cells,COMx,COMy)
+                         max_no_of_cells,COMx,COMy,traced_prev1) !,CPsize)
+       end if
+        traced_prev2 = traced_prev1
+        traced_prev1 = traced
+
   !     if rad then
   !       CALL radial_update(timestep,traced,count_tracer,max_no_of_cells,tracpo,max_tracers) 
   !     else
          CALL update_tracer(vel(:,:,1),vel(:,:,2),timestep,traced, count_tracer, &
-                          max_no_of_cells,tracpo,max_tracers)
+                          max_no_of_cells,tracpo,max_tracers,CPinfo)
   !     end if
      END IF !if onset is reached
    END IF ! if begin is reached 
@@ -308,6 +389,9 @@ prec_active(:,1) = 0
  200 CONTINUE
  WRITE(*,*) "finished main loop" 
  5000 CONTINUE
+
+ OPEN(42,FILE=trim(odir) //'/output/cp/numberoftracer.txt',FORM='formatted',ACTION='write')
+ WRITE(42,*) count_tracer
  
 
 CONTAINS
@@ -324,7 +408,8 @@ CONTAINS
   IMPLICIT NONE
   character(*), intent(in) :: varname, filename
   real, dimension(:,:), intent(inout) :: poutput
-  integer :: ncId, rhVarId, nx, ny, nz, nt, ctime
+  integer, intent(in) :: ctime
+  integer :: ncId, rhVarId, nx, ny, nz, nt
   integer, dimension(nf90_max_var_dims) :: dimIDs
 !  real, allocatable, dimension(:,:,:) ::  zvar
     CALL check(nf90_inq_varid(ncid,varname, rhVarId))
@@ -336,7 +421,6 @@ CONTAINS
     CALL check(nf90_get_var(ncid, rhVarId, poutput(1:nx,1:ny), start =(/1,1,1,ctime/),&
                                                     count= (/nx, ny,1, 1/)))
     CALL check(nf90_close(ncid))
-!write(*,*) poutput(1:3,1:3)
 !
   END SUBROUTINE read_nc_2D
 
@@ -366,7 +450,6 @@ CONTAINS
 character(len=20) function str(k)
 !   "Convert an integer to string."
     integer, intent(in) :: k
-    write (str, *) k
     str = adjustl(str)
 end function str
 !---------------------------------------------------
@@ -394,7 +477,7 @@ SUBROUTINE neigh(track_numbers,nneighb)
   IMPLICIT NONE
   INTEGER                :: i,j, imodm, imodp, jmodm,jmodp
   REAL, INTENT(IN)       :: track_numbers(dsize_x,dsize_y)
-  REAL, INTENT(INOUT)    :: nneighb(dsize_x,dsize_y)
+  INTEGER, INTENT(INOUT)    :: nneighb(dsize_x,dsize_y)
   nneighb(:,:) = 0
   DO i =2,dsize_x-1
     DO j =2,dsize_y-1
@@ -457,13 +540,15 @@ SUBROUTINE neigh2(track_numbers,max_no_of_cells,grdpnts,CPsets, counter)
   USE cp_parameters, ONLY : dsize_x, dsize_y, nTrSet
   IMPLICIT NONE
   INTEGER, INTENT(IN)    :: max_no_of_cells
-  INTEGER, INTENT(OUT)   :: CPsets(max_no_of_cells,nTrSet,2)
-  INTEGER, INTENT(OUT)   :: counter(max_no_of_cells)
+  INTEGER, INTENT(OUT)   :: CPsets(max_no_of_cells,nTrSet,2,2)
+  INTEGER, INTENT(OUT)   :: counter(max_no_of_cells,2)
   INTEGER                :: i,j,ii, imodm, imodp, jmodm,jmodp
   INTEGER, INTENT(IN)    :: grdpnts(2,dsize_x*dsize_y)
   REAL, INTENT(IN)       :: track_numbers(dsize_x,dsize_y)
-  CPsets(:,:,:) = 0
-  counter(:) = 0
+  CPsets(:,:,:,2) = CPsets(:,:,:,1)
+  CPsets(:,:,:,1) = 0
+  counter(:,2) = counter(:,1)
+  counter(:,1) = 0
   DO ii = 1,dsize_x*dsize_y
    i = grdpnts(1,ii)
    j = grdpnts(2,ii)
@@ -481,14 +566,13 @@ SUBROUTINE neigh2(track_numbers,max_no_of_cells,grdpnts,CPsets, counter)
            (track_numbers(i,j) .ne. track_numbers(imodm,jmodp)) .or. &
            (track_numbers(i,j) .ne. track_numbers(imodp,jmodm)) .or. &
            (track_numbers(i,j) .ne. track_numbers(imodm,jmodm))) THEN 
-             counter(int(track_numbers(i,j))) = counter(int(track_numbers(i,j))) +1
-             if (counter(int(track_numbers(i,j))) .le. nTrSet) then 
-               CPsets(int(track_numbers(i,j)),counter(int(track_numbers(i,j))),:) = (/i,j/)
+             counter(int(track_numbers(i,j)),1) = counter(int(track_numbers(i,j)),1) +1
+             if (counter(int(track_numbers(i,j)),1) .le. nTrSet) then 
+               CPsets(int(track_numbers(i,j)),counter(int(track_numbers(i,j)),1),:,1) = (/i,j/)
              end if
          END IF
        END IF
   END DO
-  write(*,*) 'counter 72',counter(72)
 END SUBROUTINE neigh2
 
 SUBROUTINE maxcell(track_numbers,COMx,COMy,rmax,max_no_of_cells)
@@ -534,7 +618,7 @@ SUBROUTINE initCircle(max_no_of_cells,ts,traced, COMx,COMy, &
   INTEGER, INTENT(INOUT)    :: tracpo(2,max_tracers)
   REAL, INTENT(INOUT)       :: traced(max_no_of_cells,max_tracer_CP,20)
   REAL                      :: pi, inc !, reff 
-  INTEGER                   :: i, j, pj, it
+  INTEGER                   :: i, j, pj
   pi = 2.*asin(1.)
   inc = 2*pi/nTrSet !max_tracer_CP
   do i = 1,max_no_of_cells,1 ! loop trough precip cells
@@ -586,72 +670,97 @@ END SUBROUTINE
 ! SET TRACER at their initial position acording to precipitation outlines
 !-----------------------------------------------------------------------------------
 SUBROUTINE set_tracer2(max_no_of_cells,cpio,traced,count_tracer,counter,&
-                       CPsets,ts,active_CP,tracpo,max_tracers,already_tracked)
+                       CPsets,ts,active_CP,tracpo,max_tracers,already_tracked,CPinfo)
 USE cp_parameters, ONLY: nTrSet, max_tracer_CP
 
 INTEGER, INTENT(IN) :: max_no_of_cells, ts,max_tracers
-INTEGER, INTENT(IN) :: CPsets(max_no_of_cells,nTrSet,2)
-INTEGER, INTENT(IN) :: counter(max_no_of_cells)
+INTEGER, INTENT(IN) :: CPsets(max_no_of_cells,nTrSet,2,2)
+INTEGER, INTENT(IN) :: counter(max_no_of_cells,2)
 INTEGER, INTENT(INOUT) :: already_tracked(max_no_of_cells)
 REAL, INTENT(INOUT)       :: traced(max_no_of_cells,max_tracer_CP,20)
 INTEGER, INTENT(INOUT)    :: count_tracer, active_CP(max_no_of_cells)
 INTEGER, INTENT(IN)       :: cpio(max_no_of_cells,3)
 INTEGER, INTENT(INOUT)    :: tracpo(2,max_tracers)
+INTEGER, INTENT(INOUT)    :: CPinfo(max_no_of_cells,4)
 REAL :: randy
 INTEGER :: setn,plus,i,j,ii,cc
   DO i = 1,max_no_of_cells,1 
-  if (i .eq. 72) write(*,*) 'for 72 at timestep',ts, cpio(72,:)
     IF (cpio(i,2) .ne. 0 ) then  ! no splittig event
       setn = ts-cpio(i,3) 
-      if (i .eq. 72) write(*,*) 'in first loop ', setn, ntset
       plus = setn*nTrSet 
-      cc = min(counter(i),nTrSet)
+      cc = min(counter(i,1),nTrSet)
       IF (setn .ge. 0 .and. setn .le. ntset) then  ! in timerange of setting 
         already_tracked(i) = nTrSet * (setn+1) ! number of tracer which will have been set after this routine
-        if (i .eq. 72) write(*,*) 'should be here', nTrSet, counter(i)
-        IF (counter(i) .gt. 0) then
+        IF (counter(i,1) .gt. 0) then  ! if prec outlines where found
+!write(*,*) 'prec outlines found'
           active_CP(i) = 1
           ! set tracer at center of all outer gridpints
           count_tracer = count_tracer +cc
-          traced(i,1+plus:cc+plus,1) = CPsets(i,1:cc,1) ! xpos
-          traced(i,1+plus:cc+plus,2) = CPsets(i,1:cc,2) ! ypos
-          traced(i,1+plus:cc+plus,3) = CPsets(i,1:cc,1) !xpos
-          traced(i,1+plus:cc+plus,4) = CPsets(i,1:cc,2) !ypos
-          IF (counter(i) .lt. nTrSet) then
+          traced(i,1+plus:cc+plus,1) = CPsets(i,1:cc,1,1) ! xpos
+          traced(i,1+plus:cc+plus,2) = CPsets(i,1:cc,2,1) ! ypos
+          traced(i,1+plus:cc+plus,3) = CPsets(i,1:cc,1,1) !xpos
+          traced(i,1+plus:cc+plus,4) = CPsets(i,1:cc,2,1) !ypos
+          IF (counter(i,1) .lt. nTrSet) then ! less outline points than tracers shell be placed
+!write(*,*) 'too few outlins'
             DO ii=cc+1,nTrSet
               count_tracer = count_tracer+1
               CALL RANDOM_NUMBER(randy)
-              traced(i,ii+plus,1) = CPsets(i,mod(ii,cc)+1,1) + randy
+              traced(i,ii+plus,1) = CPsets(i,mod(ii,cc)+1,1,1) + randy
               CALL RANDOM_NUMBER(randy)
-              traced(i,ii+plus,2) = CPsets(i,mod(ii,cc)+1,2) + randy
-              traced(i,ii+plus,3) = CPsets(i,mod(ii,cc)+1,1)
-              traced(i,ii+plus,4) = CPsets(i,mod(ii,cc)+1,2)
+              traced(i,ii+plus,2) = CPsets(i,mod(ii,cc)+1,2,1) + randy
+              traced(i,ii+plus,3) = CPsets(i,mod(ii,cc)+1,1,1)
+              traced(i,ii+plus,4) = CPsets(i,mod(ii,cc)+1,2,1)
             END DO
-          END IF 
-          traced(i,1+plus:nTrSet+plus,12)=cpio(i,2)  ! start
+          END IF ! setting additional tracers 
         ELSE   ! if precip does not exists, set tracer inbetween
-          write(*,*) 'precip has stoped'
-          count_tracer = count_tracer + nTrSet
-!!!!! 
-write(*,*) i, 'CP', 1+plus-1, setn, ts, cpio(i,3)
-          traced_dummy = traced(i,1+(plus-1):nTrSet+(plus-1),:)
- !         CALL sort(traced_dummy(:,:),already_tracked(i)-plus)
-          ! muss noch gemacht werten
-          traced(i,1+plus:plus+nTrSet,1) = traced(i,1:nTrSet,1) ! xpos
-          traced(i,1+plus:plus+nTrSet,2) = traced(i,1:nTrSet,2) ! xpos
-          traced(i,1+plus:plus+nTrSet,3) = traced(i,1:nTrSet,3) ! xpos
-          traced(i,1+plus:plus+nTrSet,4) = traced(i,1:nTrSet,4) ! xpos
-          traced(i,1+plus:plus+nTrSet,12)= traced(i,1:nTrSet,12)! xpos
+!write(*,*) 'prec has stoped', plus
+          if (plus .gt. 0) then ! if tracer exists 
+!write(*,*) plus, 'there must be tracres alreadz'
+!            write(*,*) 'precip has stoped'
+            count_tracer = count_tracer + nTrSet
+            traced(i,1+plus:plus+nTrSet,1) = traced(i,1:nTrSet,1) ! xpos
+            traced(i,1+plus:plus+nTrSet,2) = traced(i,1:nTrSet,2) ! xpos
+            traced(i,1+plus:plus+nTrSet,3) = traced(i,1:nTrSet,3) ! xpos
+            traced(i,1+plus:plus+nTrSet,4) = traced(i,1:nTrSet,4) ! xpos
+          else ! set on previous field
+!write(*,*) 'tracers placed at precious precip'
+            cc = min(counter(i,2),nTrSet)
+
+            IF (counter(i,2) .gt. 0) then
+              active_CP(i) = 1
+              count_tracer = count_tracer +cc
+              traced(i,1+plus:plus+cc,1) = CPsets(i,1:cc,1,2) !xpos
+              traced(i,1+plus:plus+cc,2) = CPsets(i,1:cc,2,2) !xpos
+              traced(i,1+plus:plus+cc,3) = CPsets(i,1:cc,1,2) !xpos
+              traced(i,1+plus:plus+cc,4) = CPsets(i,1:cc,2,2) !xpos
+              IF (counter(i,2) .lt. nTrSet) then
+                DO ii=cc+1,nTrSet
+                  count_tracer = count_tracer+1
+                  CALL RANDOM_NUMBER(randy)
+                  traced(i,ii+plus,1) = CPsets(i,mod(ii,cc)+1,1,1) + randy
+                  CALL RANDOM_NUMBER(randy)
+                  traced(i,ii+plus,2) = CPsets(i,mod(ii,cc)+1,2,1) + randy
+                  traced(i,ii+plus,3) = CPsets(i,mod(ii,cc)+1,1,1)
+                  traced(i,ii+plus,4) = CPsets(i,mod(ii,cc)+1,2,1)
+                END DO
+              END IF
+          END IF
+
+          end if
+   
         END IF
         traced(i,1+plus:plus+nTrSet,11) = 1
         traced(i,1+plus:plus+nTrSet,6) = ts
         traced(i,1+plus:plus+nTrSet,(/7,18/)) =setn ! age, setn
-        traced(i,1+plus:nTrSet+plus,9) = i
+        CPinfo(i,1) = setn
+        traced(i,1+plus:nTrSet+plus,9) = cpio(i,1)
         traced(i,1+plus:plus+nTrSet,10) = (/(j, j =count_tracer+1-nTrSet,count_tracer )/)
+        traced(i,1+plus:plus+nTrSet,12) = cpio(i,2)
         tracpo(1,count_tracer+1-nTrSet:count_tracer) = i
         tracpo(2,count_tracer+1-nTrSet:count_tracer) = (/(j, j =1+plus,plus+nTrSet )/)
       END IF !timestep within the timerange when tracers shell be set for thisCP
     END IF  ! precip event is no splitting
+!  if (i .eq. 72 .and. timestep .gt. 155 .and. timestep .lt. 158) write(*,*) traced(i,1:tracpo(2,count_tracer),1:2)
   END DO
 END SUBROUTINE set_tracer2
 
@@ -662,7 +771,7 @@ SUBROUTINE set_tracer(nneighb,track_numbers, max_no_of_cells,&
                       timestep,traced,count_tracer,&
                       already_tracked,tracpo,max_tracers,cpio)
 USE cp_parameters, ONLY : dsize_x, dsize_y,max_tracer_CP
-  REAL, INTENT(INOUT)       :: nneighb(dsize_x,dsize_y)
+  INTEGER, INTENT(INOUT)    :: nneighb(dsize_x,dsize_y)
   REAL, INTENT(IN)          :: track_numbers(dsize_x,dsize_y)
   INTEGER, INTENT(IN)       :: cpio(1700,2)
   INTEGER, INTENT(IN)       :: timestep
@@ -740,7 +849,7 @@ END SUBROUTINE set_tracer
 ! UPDATE TRACER along the horizontal wind field
 !-----------------------------------------------------------------------------------
 SUBROUTINE velocity_interpol(velx,vely,timestep,traced, count_tracer,max_no_of_cells,tracpo,max_tracers)
-USE cp_parameters, ONLY : dsize_x, dsize_y, res, dt, max_tracer_CP
+USE cp_parameters, ONLY : dsize_x, dsize_y, max_tracer_CP
 
   INTEGER, INTENT(IN)       :: timestep,max_no_of_cells, max_tracers
   REAL, INTENT(IN)          :: velx(dsize_x,dsize_y), &
@@ -749,10 +858,9 @@ USE cp_parameters, ONLY : dsize_x, dsize_y, res, dt, max_tracer_CP
   !INTEGER, INTENT(IN)       :: cp_field(dsize_x,dsize_y)
   INTEGER                   :: tracer_ts, it
   REAL, INTENT(INOUT)       :: traced(max_no_of_cells,max_tracer_CP,20)
-  REAL                      :: ix_new, iy_new, vx_intp, vy_intp
+  REAL                      :: vx_intp, vy_intp
   REAL                      :: ix, iy, ixt, iyt    !t are half level (interface)
-!  INTEGER                   :: ix_round, iy_round, &
-  INTEGER                   :: ix_new_round, iy_new_round, start_time
+  INTEGER                   :: start_time
   INTEGER                   :: ix_l, iy_l, ix_r, iy_r
   REAL                      :: wgt_x, wgt_y, wgt_xt, wgt_yt
   INTEGER, INTENT(IN)       :: tracpo(2,max_tracers)
@@ -817,7 +925,7 @@ END SUBROUTINE velocity_interpol
 
 SUBROUTINE update_newtracer(velx,vely,timestep,traced, count_tracer,max_no_of_cells,tracpo,max_tracers)
 !OCH TO DO: dt and resolution should be parameter read by USE from module
-USE cp_parameters, ONLY : dsize_x, dsize_y, res, dt, max_tracer_CP
+USE cp_parameters, ONLY : dsize_x, dsize_y, res, max_tracer_CP
 
   INTEGER, INTENT(IN)       :: timestep,max_no_of_cells, max_tracers
   REAL, INTENT(IN)          :: velx(dsize_x,dsize_y), &
@@ -837,7 +945,7 @@ USE cp_parameters, ONLY : dsize_x, dsize_y, res, dt, max_tracer_CP
   sub_dt =60 ! update evry min
   it = 1 ! counter trough traced
   DO WHILE (it .LT. count_tracer) ! count tracer are all tracers set until here
-   IF (traced(tracpo(1,it),tracpo(2,it),18) .eq.traced(tracpo(1,it),tracpo(2,it),7) )THEN
+   IF (int(traced(tracpo(1,it),tracpo(2,it),18)) .eq.int(traced(tracpo(1,it),tracpo(2,it),7)) )THEN
     ! determining the first time step of the event
      start_time=INT(traced(tracpo(1,it),tracpo(2,it),6))
      ! determining how many timesteps have passed since then
@@ -916,14 +1024,16 @@ USE cp_parameters, ONLY : dsize_x, dsize_y, res, dt, max_tracer_CP
 END SUBROUTINE update_newtracer
 
 
-SUBROUTINE update_tracer(velx,vely,timestep,traced, count_tracer,max_no_of_cells,tracpo,max_tracers)
+SUBROUTINE update_tracer(velx,vely,timestep,traced, count_tracer,max_no_of_cells,tracpo,max_tracers, &
+                         CPinfo)
 !OCH TO DO: dt and resolution should be parameter read by USE from module
-USE cp_parameters, ONLY : dsize_x, dsize_y, res, dt, max_tracer_CP, max_age
+USE cp_parameters, ONLY : dsize_x, dsize_y, res, max_tracer_CP, max_age
 
   INTEGER, INTENT(IN)       :: timestep,max_no_of_cells, max_tracers
   REAL, INTENT(IN)          :: velx(dsize_x,dsize_y), &
                                vely(dsize_x,dsize_y)
   INTEGER, INTENT(IN)       :: count_tracer !,max_tracer_CP
+  INTEGER, INTENT(INOUT)    :: CPinfo(max_no_of_cells,4)
   !INTEGER, INTENT(IN)       :: cp_field(dsize_x,dsize_y)
   INTEGER                   :: tracer_ts, it
   REAL, INTENT(INOUT)       :: traced(max_no_of_cells,max_tracer_CP,20)
@@ -1012,11 +1122,16 @@ USE cp_parameters, ONLY : dsize_x, dsize_y, res, dt, max_tracer_CP, max_age
      traced(tracpo(1,it),tracpo(2,it),4) = float(iy_new_round)
 
      traced(tracpo(1,it),tracpo(2,it),6) = start_time !timestep
+     CPinfo(tracpo(1,it),1) = CPinfo(tracpo(1,it),1) +1
      traced(tracpo(1,it),tracpo(2,it),7) = traced(tracpo(1,it),tracpo(2,it),7) +1 !tracer_ts  !age
      if (traced(tracpo(1,it),tracpo(2,it),7) .gt. max_age) then 
       traced(i,:,11) = 0
      end if
      traced(tracpo(1,it),tracpo(2,it),10) = it
+     !if (prec_active(ID,1) .eq. 0) then ! precip is not active anymore, switch
+     !                                   !ID to merger if its merging
+     !traced(tracpo(1,it),tracpo(2,it),12) = 
+     !end if
      it = it + 1
 !make separate routine
 !     if (cp_field(ix_new_round,ix_new_round) .eq. 0 & ! no or no other cp at this gp
@@ -1086,10 +1201,10 @@ USE cp_parameters, ONLY : dsize_x, dsize_y, max_tracer_CP
 !      ELSE IF (DELTAx(i,j) .eq. 0 .and. DELTAy(i,j) .lt. 0) THEN
 !       traced(i,j,8) =  pi
 !      END IF
-      IF      (DELTAx(i,j) .gt. 0 .and. DELTAy(i,j) .gt. 0) THEN
+      IF      (DELTAx(i,j) .gt. 0. .and. DELTAy(i,j) .gt. 0.) THEN
        traced(i,j,8) = atan(DELTAy(i,j)/DELTAx(i,j))
 
-      ELSE IF (DELTAx(i,j) .lt. 0 .and. DELTAy(i,j) .gt. 0) THEN  ! 2nd
+      ELSE IF (DELTAx(i,j) .lt. 0. .and. DELTAy(i,j) .gt. 0.) THEN  ! 2nd
        traced(i,j,8) = atan(abs(DELTAx(i,j))/DELTAy(i,j)) + 1./2.*pi
 
       ELSE IF (DELTAx(i,j) .lt. 0 .and. DELTAy(i,j) .lt. 0) THEN  ! 3nd
@@ -1101,7 +1216,7 @@ USE cp_parameters, ONLY : dsize_x, dsize_y, max_tracer_CP
       ELSE IF (DELTAx(i,j) .gt. 0 .and. DELTAy(i,j) .eq. 0)THEN
        traced(i,j,8) = 0.
 
-      ELSE IF (DELTAx(i,j) .lt. 0 .and. DELTAy(i,j) .eq. 0) THEN
+      ELSE IF (DELTAx(i,j) .lt. 0. .and. DELTAy(i,j) .eq. 0.) THEN
        traced(i,j,8) =  pi
 
       ELSE IF (DELTAx(i,j) .eq. 0 .and. DELTAy(i,j) .gt. 0) THEN
@@ -1149,12 +1264,10 @@ SUBROUTINE radial_update(timestep,traced,count_tracer,max_no_of_cells,tracpo,max
 USE cp_parameters, ONLY : dsize_x, dsize_y, res, dt, max_tracer_CP
   INTEGER, INTENT(IN)       :: timestep,max_no_of_cells, max_tracers
   INTEGER, INTENT(IN)       :: count_tracer !,max_tracer_CP
-  !INTEGER, INTENT(IN)       :: cp_field(dsize_x,dsize_y)
   INTEGER                   :: tracer_ts, it
   REAL, INTENT(INOUT)       :: traced(max_no_of_cells,max_tracer_CP,20)
   REAL                      :: ix_new, iy_new, vx_intp, vy_intp
-  REAL                      :: ix, iy, ixt, iyt    !t are half level (interface)
-!  INTEGER                   :: ix_round, iy_round, &
+  REAL                      :: ix, iy    !t are half level (interface)
   INTEGER                   :: ix_new_round, iy_new_round, start_time
   INTEGER, INTENT(IN)       :: tracpo(2,max_tracers)
 
@@ -1226,32 +1339,32 @@ SUBROUTINE sort(traced_dummy,jc)
  200 FORMAT   (2(2X,I4) ,   3(2X,F11.5), 2X,F5.3, 2(2X,F11.3))
 
 END SUBROUTINE sort
-SUBROUTINE setongrid(traced_dummy,map,map2,CPID,cogx,cogy,counter2)
+SUBROUTINE setongrid(traced_dummy,map,map2,CPID,cogx,cogy,CPinfo,max_no_of_cells,tracked)
 USE cp_parameters, ONLY : dsize_x, dsize_y, max_tracer_CP
   INTEGER,INTENT(INOUT) :: map(dsize_x, dsize_y),map2(dsize_x, dsize_y)
+  INTEGER, INTENT(IN)   :: max_no_of_cells
+  INTEGER, INTENT(IN)   :: tracked
+  INTEGER,INTENT(IN)    :: cpinfo(max_no_of_cells)
   INTEGER               :: maptr(dsize_x, dsize_y),maptr2(dsize_x, dsize_y),maptr3(dsize_x, dsize_y) 
   INTEGER, INTENT(IN)      ::  CPID
   REAL, INTENT(IN) :: traced_dummy(max_tracer_CP,20)
   REAL :: dum(max_tracer_CP,20), dumdum(max_tracer_CP,20)
   REAL, INTENT(IN) :: cogx, cogy
-  INTEGER :: i,j,jsave,k, l
-  INTEGER ::ii,ij,jj, deltax,deltay,dx, dy, ix, iy,oldx,c,oldy,nx,ny,x,y,xtemp,ytemp,xp,yp
-  REAL :: pi,  s, centerx, centery
-  INTEGER :: d, cc, mapmap(dsize_x, dsize_y), checker, counter
-  INTEGER, INTENT(OUT) :: counter2
+  INTEGER :: i,j,jsave
+  INTEGER ::ii,ij, deltax,deltay, ix, iy,oldx,c,oldy,x,y,xtemp,ytemp
+  REAL :: pi, centerx, centery
+  INTEGER :: d,  mapmap(dsize_x, dsize_y), checker, counter
   REAL :: rsave
   REAL :: dist, distnew
-  INTEGER ::nextracer, startc
+  INTEGER :: startc
   INTEGER :: savei
   INTEGER :: firstx, firsty
 
-  write(*,*) 'CP', CPID
+  !write(*,*) 'CP', CPID
   checker = 0
-  counter2 = 0
   counter=0
   pi = 2.*asin(1.)
   c =1
-  cc = 1
   centerx = 0
   centery = 0
   mapmap = 0
@@ -1272,7 +1385,7 @@ USE cp_parameters, ONLY : dsize_x, dsize_y, max_tracer_CP
 !  end do    
 
   rsave = 0.
-  DO i=1,max_tracer_CP
+  DO i=1,tracked !max_tracer_CP
      IF (traced_dummy(i,7) .gt. traced_dummy(i,18)) THEN
        dumdum(c,:) = traced_dummy(i,:)  
        if (traced_dummy(i,5) .gt. rsave) then
@@ -1334,24 +1447,27 @@ USE cp_parameters, ONLY : dsize_x, dsize_y, max_tracer_CP
             else
               jsave =1
               dist=sqrt(real(oldx-x)**2+real(oldy-y)**2)! max(abs(oldx-xtemp),abs(oldy-ytemp))  
-              do j=1,int(c-i)/2
+              do j=1,int(c-i)/8
                 ij = mod(i+j-1,c-1)+1
-                xtemp = mod(int(dum(ij,3))-1+deltax+dsize_x,dsize_x)+1  
-                ytemp = mod(int(dum(ij,4))-1+deltay+dsize_y,dsize_y)+1
-                if((abs(oldx-xtemp) .lt. 1.1 ) .and. (abs(oldy-ytemp) .le. 1.)) then
-                  i = ij
-                  maptr3(xtemp,ytemp) = ij
-                  maptr2(xtemp,ytemp) = -2
-                  maptr(xtemp,ytemp) = CPID
-                  GOTO 2912  ! END OF LOOP
-                else
-                  distnew = sqrt(real(oldx-xtemp)**2+real(oldy-ytemp)**2) !max(abs(oldx-xtemp),abs(oldy-ytemp)) !sqrt(real(oldx-xtemp)**2+real(oldy-ytemp)**2)
-                  if (distnew .lt. dist) then
-                     jsave = j
-                     dist = distnew
-                     x = xtemp !mod(int(dum(i,3))-1+deltax+dsize_x,dsize_x)+1
-                     y = ytemp !mod(int(dum(i,4))-1+deltay+dsize_y,dsize_y)+1
-                   end if 
+                if (dum(ij,5) .gt. dum(i,5)) then ! this routin should skip 
+                              !tracers ling to far inside the CP, so only if the nex tracers is further away 
+                  xtemp = mod(int(dum(ij,3))-1+deltax+dsize_x,dsize_x)+1  
+                  ytemp = mod(int(dum(ij,4))-1+deltay+dsize_y,dsize_y)+1
+                  if ((abs(oldx-xtemp) .lt. 1.1 ) .and. (abs(oldy-ytemp) .le. 1.))  then
+                    i = ij
+                    maptr3(xtemp,ytemp) = ij
+                    maptr2(xtemp,ytemp) = -2
+                    maptr(xtemp,ytemp) = CPID
+                    GOTO 2912  ! END OF LOOP
+                  else
+                    distnew = sqrt(real(oldx-xtemp)**2+real(oldy-ytemp)**2) !max(abs(oldx-xtemp),abs(oldy-ytemp)) !sqrt(real(oldx-xtemp)**2+real(oldy-ytemp)**2)
+                    if (distnew .lt. dist) then
+                      jsave = j
+                      dist = distnew
+                      x = xtemp !mod(int(dum(i,3))-1+deltax+dsize_x,dsize_x)+1
+                      y = ytemp !mod(int(dum(i,4))-1+deltay+dsize_y,dsize_y)+1
+                    end if 
+                   end if
                  end if
                end do
                ! set inbetwen points
@@ -1360,7 +1476,7 @@ USE cp_parameters, ONLY : dsize_x, dsize_y, max_tracer_CP
               maptr3(x,y) = ij
               maptr2(x,y) = -2
               maptr(x,y) = CPID
-
+!     if (CPID .eq. 72) write(*,*) 'fill',xtemp,ytemp,x,y
               CALL filltracer(xtemp,ytemp,x,y,maptr, maptr2,maptr3, CPID, &
                       centerx, centery, counter, checker) 
              end if ! end neighb yes or no
@@ -1376,8 +1492,8 @@ USE cp_parameters, ONLY : dsize_x, dsize_y, max_tracer_CP
                      centerx, centery, counter, checker)
 
       1288 CONTINUE
-ii = centerx
-ij = centery
+  ii = int(centerx)
+  ij = int(centery)
 !!  d = 1
   maptr3 = maptr2
   maptr2 = maptr
@@ -1399,21 +1515,24 @@ ij = centery
 !  if (ANY(maptr(:,dsize_y-2:dsize_y) .eq. CPID)) maptr(:,:) = maptr2
 
 ! just to controll where centers are placed
-  maptr2(centerx,centery) = -2
+  maptr2(int(centerx),int(centery)) = -2
   maptr2(dsize_x/2,dsize_y/2) = -4
 
 ! transfer nback   ! why + deltax???
   do ix=1,dsize_x
    do iy=1,dsize_y
-    if  ((maptr(mod(ix+deltax-1+dsize_x,dsize_x)+1,mod(iy+deltay-1+dsize_y,dsize_y)+1) .ne.0) .or. &
-       (maptr2(mod(ix+deltax-1+dsize_x,dsize_x)+1,mod(iy+deltay-1+dsize_y,dsize_y)+1) .ne.0)) then
-! CPID  &
-!      .or. maptr(mod(ix+deltax-1+dsize_x,dsize_x)+1,mod(iy+deltay-1+dsize_y,dsize_y)+1) .eq. -2) then
-       !if (map(ix,iy) .eq. 0) then
-         counter2 = counter2+1
-      ! end if
+    if  (maptr(mod(ix+deltax-1+dsize_x,dsize_x)+1,mod(iy+deltay-1+dsize_y,dsize_y)+1) .ne.0) then
+       if (map(ix,iy) .eq. 0) then ! no CP exists at this gp
+         map(ix,iy)=maptr(mod(ix+deltax-1+dsize_x,dsize_x)+1,mod(iy+deltay-1+dsize_y,dsize_y)+1)
+       else if (cpinfo(map(ix,iy)) .gt. cpinfo(CPID) ) then ! older CP exists at this gp
+         map(ix,iy)=maptr(mod(ix+deltax-1+dsize_x,dsize_x)+1,mod(iy+deltay-1+dsize_y,dsize_y)+1)
+       end if
+!         map(ix,iy)=maptr(mod(ix+deltax-1+dsize_x,dsize_x)+1,mod(iy+deltay-1+dsize_y,dsize_y)+1)
+!       else
+!         map(ix,iy)=-2
+!       end if
+!       map(ix,iy)=maptr(mod(ix+deltax-1+dsize_x,dsize_x)+1,mod(iy+deltay-1+dsize_y,dsize_y)+1)
 
-       map(ix,iy)=maptr(mod(ix+deltax-1+dsize_x,dsize_x)+1,mod(iy+deltay-1+dsize_y,dsize_y)+1)
        map2(ix,iy)=maptr2(mod(ix+deltax-1+dsize_x,dsize_x)+1,mod(iy+deltay-1+dsize_y,dsize_y)+1)
 
     end if
@@ -1441,6 +1560,8 @@ INTEGER :: xtemp, ytemp, dx, dy
   do while (xtemp .ne. x .or. ytemp .ne. y)
     dx = xtemp-x
     dy = ytemp-y
+!    if (CPID .eq. 72) write(*,*) dx, dy, xtemp, x, ytemp, y
+
     if (abs(dx) .gt. abs(dy)) then
       xtemp = xtemp - 1*((dx/abs(dx)))
       ytemp = ytemp -(dy/dx)*(dx/abs(dx))
@@ -1558,7 +1679,7 @@ USE  cp_parameters, ONLY :max_tracer_CP
          end if
        END DO
        dif = 2.*pi -tdummy(tracked_no) + tdummy(1)
-       if (traced(1,11) .eq. 1) then
+       if (int(traced(1,11)) .eq. 1) then
        if (dif .gt. 2./3.* pi ) then
          !write(*,*) "no tracers on both sides of CP, stop CP"
          !write(*,*) tdummy(1), tdummy(tracked_no)
@@ -1592,7 +1713,7 @@ USE  cp_parameters, ONLY :max_tracer_CP
      if (dv .gt. 1.) THEN !decelerate
       traced(tracpo(1,it),tracpo(2,it),11) = 1
      !if accelerated and decelerated already before 
-     else if (dv .lt. 1. .and. traced(tracpo(1,it),tracpo(2,it),11) .eq. 1) THEN
+     else if (dv .lt. 1. .and. int(traced(tracpo(1,it),tracpo(2,it),11)) .eq. 1) THEN
        traced(tracpo(1,it),tracpo(2,it),11) = 0  ! set tracer inactive 
      end if
      it = it+1
@@ -1600,13 +1721,14 @@ USE  cp_parameters, ONLY :max_tracer_CP
 END SUBROUTINE
 
 SUBROUTINE write_output(traced,max_tracers,count_tracer,timestep,tracpo,&
-                       max_no_of_cells,COMx,COMy)
-USE  cp_parameters, ONLY :max_tracer_CP, max_age
+                       max_no_of_cells,COMx,COMy,traced_prev2)
+USE  cp_parameters, ONLY :max_tracer_CP !, max_age
   INTEGER, INTENT(IN)       :: count_tracer,max_tracers, timestep, &
                                max_no_of_cells !, max_tracer_CP 
   INTEGER                   :: it
   INTEGER,INTENT(IN)        :: tracpo(2,max_tracers)
   REAL, INTENT(INOUT)       :: traced(max_no_of_cells, max_tracer_CP,20)
+  REAL, INTENT(INOUT)       :: traced_prev2(max_no_of_cells, max_tracer_CP,20)
   REAL, INTENT(IN)          :: COMx(max_no_of_cells), COMy(max_no_of_cells)
   it=1
 
@@ -1622,33 +1744,35 @@ USE  cp_parameters, ONLY :max_tracer_CP, max_age
                 2(2X,I4))       ! precip ID
   ! updating previous tracers
   DO WHILE (it .LT. count_tracer)
-    IF (traced(tracpo(1,it),tracpo(2,it),11)  .eq. 1.) THEN  !trace only if tracer is active
+    IF (int(traced(tracpo(1,it),tracpo(2,it),11))  .eq. 1) THEN  !trace only if tracer is active
       !IF(INT(traced(tracpo(1,it),tracpo(2,it),7)) .le. max_age)then   ! output only up to  3hours
-        WRITE(40,150) INT(timestep),INT(traced(tracpo(1,it),tracpo(2,it),7)),& !timestep, age
-                        it,INT(traced(tracpo(1,it),tracpo(2,it),12)),& !tracer and CP ID
-                        traced(tracpo(1,it),tracpo(2,it),1),traced(tracpo(1,it),tracpo(2,it),2),& !pos 1-2
-                        INT(traced(tracpo(1,it),tracpo(2,it),3)),INT(traced(tracpo(1,it),tracpo(2,it),4)),& !rounded
-                        traced(tracpo(1,it),tracpo(2,it),5),traced(tracpo(1,it),tracpo(2,it),8),& !distance and angle
-                        traced(tracpo(1,it),tracpo(2,it),13),traced(tracpo(1,it),tracpo(2,it),14),& ! u, v Wind component
-                        traced(tracpo(1,it),tracpo(2,it),15),traced(tracpo(1,it),tracpo(2,it),17),& ! x and y distance  
+      IF (INT(traced_prev2(tracpo(1,it),tracpo(2,it),12)) .ne. 0) then
+        WRITE(40,150) INT(timestep)-1,INT(traced_prev2(tracpo(1,it),tracpo(2,it),7)),& !timestep, age
+                        it,INT(traced_prev2(tracpo(1,it),tracpo(2,it),12)),& !tracer and CP ID
+                        traced_prev2(tracpo(1,it),tracpo(2,it),1),traced_prev2(tracpo(1,it),tracpo(2,it),2),& !pos 1-2
+                        INT(traced_prev2(tracpo(1,it),tracpo(2,it),3)),INT(traced_prev2(tracpo(1,it),tracpo(2,it),4)),& !rounded
+                        traced_prev2(tracpo(1,it),tracpo(2,it),5),traced_prev2(tracpo(1,it),tracpo(2,it),8),& !distance and angle
+                        traced_prev2(tracpo(1,it),tracpo(2,it),13),traced_prev2(tracpo(1,it),tracpo(2,it),14),& ! u, v Wind component
+                        traced_prev2(tracpo(1,it),tracpo(2,it),15),traced_prev2(tracpo(1,it),tracpo(2,it),17),& ! x and y distance  
                         COMx(tracpo(1,it)), COMy(tracpo(1,it))                                   ,& ! center
-                        INT(traced(tracpo(1,it),tracpo(2,it),16)), INT(traced(tracpo(1,it),tracpo(2,it),9)),&   ! merger, prec ID
-                        INT(traced(tracpo(1,it),tracpo(2,it),18))   !timesteps set after precip start
+                        INT(traced_prev2(tracpo(1,it),tracpo(2,it),16)), INT(traced_prev2(tracpo(1,it),tracpo(2,it),9)),&   ! merger, prec ID
+                        INT(traced_prev2(tracpo(1,it),tracpo(2,it),18))   !timesteps set after precip start
 
-        IF (INT(traced(tracpo(1,it),tracpo(2,it),7)) .gt. INT(traced(tracpo(1,it),tracpo(2,it),18)) &
-           .or. INT(traced(tracpo(1,it),tracpo(2,it),7)) .eq. 0 ) THEN
-          WRITE(41,150) INT(timestep),INT(traced(tracpo(1,it),tracpo(2,it),7)),&!timestep, age
-                        it,INT(traced(tracpo(1,it),tracpo(2,it),12)),& !tracerand CP ID
-                        traced(tracpo(1,it),tracpo(2,it),1),traced(tracpo(1,it),tracpo(2,it),2),&!pos 1-2
-                        INT(traced(tracpo(1,it),tracpo(2,it),3)),INT(traced(tracpo(1,it),tracpo(2,it),4)),&!rounded
-                        traced(tracpo(1,it),tracpo(2,it),5),traced(tracpo(1,it),tracpo(2,it),8),&!distance and angle
-                        traced(tracpo(1,it),tracpo(2,it),13),traced(tracpo(1,it),tracpo(2,it),14),&! u, v Wind component
-                        traced(tracpo(1,it),tracpo(2,it),15),traced(tracpo(1,it),tracpo(2,it),17),&! x and y distance  
+        IF (INT(traced_prev2(tracpo(1,it),tracpo(2,it),7)) .gt. INT(traced_prev2(tracpo(1,it),tracpo(2,it),18)) &
+           .or. INT(traced_prev2(tracpo(1,it),tracpo(2,it),7)) .eq. 0 ) THEN
+          WRITE(41,150) INT(timestep)-1,INT(traced_prev2(tracpo(1,it),tracpo(2,it),7)),&!timestep, age
+                        it,INT(traced_prev2(tracpo(1,it),tracpo(2,it),12)),& !tracerand CP ID
+                        traced_prev2(tracpo(1,it),tracpo(2,it),1),traced_prev2(tracpo(1,it),tracpo(2,it),2),&!pos 1-2
+                        INT(traced_prev2(tracpo(1,it),tracpo(2,it),3)),INT(traced_prev2(tracpo(1,it),tracpo(2,it),4)),&!rounded
+                        traced_prev2(tracpo(1,it),tracpo(2,it),5),traced_prev2(tracpo(1,it),tracpo(2,it),8),&!distance and angle
+                        traced_prev2(tracpo(1,it),tracpo(2,it),13),traced_prev2(tracpo(1,it),tracpo(2,it),14),&! u, v Wind component
+                        traced_prev2(tracpo(1,it),tracpo(2,it),15),traced_prev2(tracpo(1,it),tracpo(2,it),17),&! x and y distance  
                         COMx(tracpo(1,it)), COMy(tracpo(1,it)) ,& ! center
-                        INT(traced(tracpo(1,it),tracpo(2,it),16)),INT(traced(tracpo(1,it),tracpo(2,it),9)),&   ! merger, prec ID
-                        INT(traced(tracpo(1,it),tracpo(2,it),18))   !timestepsset after precip start
+                        INT(traced_prev2(tracpo(1,it),tracpo(2,it),16)),INT(traced_prev2(tracpo(1,it),tracpo(2,it),9)),&   ! merger, prec ID
+                        INT(traced_prev2(tracpo(1,it),tracpo(2,it),18))   !timestepsset after precip start
 
-        END IF           
+        END IF 
+      END IF          
     !   END IF
     END IF
     it = it+1

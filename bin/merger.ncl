@@ -79,6 +79,7 @@ end do
 do i = 0, na-1  ; na is number of all tracks
   ; get the size at every timestep for the current ID i 
   currentareas := track(ind(track(:,0) .eq. ta(i)),4)
+
   if (ta(i) .eq. 57) 
     print(currentareas)
     print("index"+ind(track(:,0) .eq. ta(i)))
@@ -95,7 +96,6 @@ do i = 0, na-1  ; na is number of all tracks
     print("cp "+i + " tr2 "+tr2+" area max "+max(currentareas)) 
     outvar(1,ta(i)-1) = 0 ; set ID to zero as for fragmentation. No tracers are ste for this cases  
   end if
-  
   outvar(2,ta(i)-1) = start 
   outvar(3,ta(i)-1) = min(track(ind(track(:,0) .eq. ta(i)),1))
 end do

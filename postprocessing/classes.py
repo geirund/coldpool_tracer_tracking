@@ -1,4 +1,21 @@
 import numpy as np
+import collections
+class CPstart():
+
+    def __init__(self,ttime,x,y,r):
+      #self.ID = {}
+      self.x  = x
+      self.t = ttime
+      self.y = y
+      self.r = r
+      self.time = ttime
+#    def __getitem__(self, x,t,y,r,time):
+#        return self.t[item]
+    #def set(self,ID,x,y,r):
+    #  #self.ID[ID] = ID
+    #  self.x[ID] = x
+    #  self.y[ID] = y
+    #  self.r[ID] = r
 
 class CP_map():
     def __init__(self):
@@ -7,32 +24,129 @@ class CP_map():
       self.age = {}
       self.nCPs = 0
       self.nTrtot = 0
-      self.nTrCP = {} 
-
-    def add(self,ID,age):
+      self.nTrCP = {}
+      self.tracers={}
+    def add(self,ID,age,tracer):
       if ID in self.CPs.keys():
         self.nTrCP[ID] += 1
       else:
+        self.tracers[ID] = []
         self.CPs[ID] = ID
         self.nTrCP[ID] = 1
         self.nCPs += 1
         self.age[ID] = age
+      self.tracers[ID].append(tracer)
       self.nTrtot += 1
+    def overwrite(self):
+      for k in self.CPs.keys():
+        del self.CPs[k]
+        del self.age[k]
+        del self.nTrCP[k]
+      self.tracers = []
+      self.nCPs  = 0
+    def overwrite_i(self,k):
+      if k in self.CPs.keys():
+        del self.CPs[k]
+        del self.age[k]
+        del self.nTrCP[k]
+        self.nCPs -= 1
+
 ########################################################
 class COL():         # key are colliding CP combination
     def __init__(self):
       self.x = {}    # dict with timesteps as key giving a list 
       self.y = {}    # ...of all collision points for this CP combi
+      self.FF = {}
       self.ntot= {}  # ... of number of Tracers accumulating at collsion
-    def add(self,t,x,y,ntot):
+    def add(self,t,x,y,FF,ntot):
       if not t in self.x.keys(): 
         self.x[t]    = []
         self.y[t]    = []
+        self.FF[t]   = []
         self.ntot[t] = 0
       self.x[t].append(x)
       self.y[t].append(y)
+      self.FF[t].append(FF)
       self.ntot[t] += ntot
 
+class TRACER():
+    def __init__(self):
+      self.age = {}    # age of tracer
+      self.CP = {}     # CP/ precip ID
+      self.x = {}      # grid point position x
+      self.y = {}      #                     y
+      self.xx = {}     # accurate position
+      self.yy ={}
+      self.mm = {}     # merger = 1
+      self.pID = {}    # precipitation ID (is different to CPID if mm =1)
+      self.d = {}      # distance to COG (from precip)
+      self.xd = {}     # in x
+      self.yd = {}     # in y
+      self.phi = {}    # angle btw tracer and COG to x-Axis
+      self.u = {}      # velocity in x
+      self.v = {}
+      self.FF = {}     # horizontal wind speed
+      self.DD={}       # wind direction
+      self.vr = {}     # radial velocity
+      self.vt = {}     # tangential
+      self.cogx={}     # COG from precip
+      self.cogy={}
+      self.ncolT = {}  # no of collided tracer
+      self.ncolCP = {} # no of collided CPs
+      self.colCPs = {}
+      self.colCP = {}
+      self.active = {}
+    def add(self,t,age,CP,x,y,d,phi,u,v,FF,vr,vt,xd,yd,cogx,cogy,alpha,xpos1,ypos1,mm,pID):
+      self.age[t] = age
+      self.CP[t] = CP
+      self.x[t] = x
+      self.y[t] = y
+      self.xx[t] = xpos1
+      self.yy[t] = ypos1
+      self.mm[t] = mm
+      self.pID[t] = pID
+      self.d[t] = d
+      self.xd[t] = xd
+      self.yd[t] = yd
+      self.phi[t] = phi
+      self.u[t] = u
+      self.v[t] = v
+      self.FF[t] = FF
+      self.DD[t] = alpha
+      self.vr[t] = vr
+      self.cogx[t] =cogx
+      self.cogy[t] = cogy
+      self.vt[t] = vt
+      self.ncolT[t] = 0
+      self.ncolCP[t] =0
+      self.active[t] = 1
+    def setcol(self,t,CPs):
+       if CPs != self.CP.values()[0]:
+        if t not in self.colCPs.keys():
+          self.ncolCP[t] = 1
+          self.ncolT[t] = 1
+          self.colCPs[t] = []
+          self.colCPs[t].append(CPs)
+        else:
+          #print t
+          #print self.colCPs[t] 
+          #if CPs not in self.colCPs[t]:
+          #self.ncolCP[t] += 1
+          self.colCPs[t].append(CPs)
+          self.colCP[t] = np.unique(self.colCPs[t])
+          self.ncolCP[t] = len(self.colCP[t])
+          #self.colCPs[t], self.ncolCP[t] = np.unique(self.colCPs[t], return_counts=True)       
+      #self.colCPs[t] = CPs
+      #self.ncolCP[t] = n
+      #self.ncolT[t] = nt
+      # else:
+      #    print 'own'
+    def addcol(self,t,CP):
+      if not CP in self.colCPs[t]:
+        self.colCPs[t].append(CP)
+        self.ncolCP[t] += 1
+      self.ncolT[t] += 1
+ 
 ########################################################
 class CPlife():
     def __init__(self,ID,t):
@@ -47,6 +161,7 @@ class CPlife():
       self.noIGP   = {}     # no of individual grid point
       self.x       = {}
       self.y       = {}
+#      self.FF      = {}
       self.combi   = {} 
     def add(self,noT,noIT,noIGP,t,age,x,y):
       if t in self.noGP.keys():
@@ -60,6 +175,7 @@ class CPlife():
           self.age[t]= age        
         self.x[t].append(x) 
         self.y[t].append(y)
+#        self.FF[t].append(FF)
       else:
         self.noGP[t]  = 1
         self.noT[t]   = noT
@@ -68,6 +184,7 @@ class CPlife():
         self.age[t]   = age
         self.x[t] = []
         self.y[t] = []
+#        self.FF[t] = []
 
     def add_others(self,t,cp,n,nother):
       if (t,cp) in self.combi.keys():
@@ -178,7 +295,43 @@ class Marker2():
       self.phi.append(p)
     def add_others(self,size):
       self.size=size
+###########################################################################
+class RAINCLOUD():
+  def __init__(self,ID):
+    self.ID = ID
+    self.ts = {}
+    self.size = {}
+    self.inten = {}
+    self.parent = {}
+    self.mainparent =0
+    self.dur = 0
+    self.start = 0
+    self.age = {}
+    self.twp = {}
+    self.delaycloud=0 #delay from start of precip to cloud
+    self.trackdelay=0 #delay from start of precip track to reach threshold size
+    self.delay=0      #sum of delays
+  def add_parent(self,hyd,ID_parent,main_parent):
+    self.parent[hyd] = ID_parent #input already as list
+    self.mainparent=main_parent
+  def add_info(self,ts,size,prec):
+    if self.start == 0:
+      self.start = ts
+      self.age[ts] = 0
+    else:
+      self.age[ts]= ts-self.start
+    self.ts[ts] = ts
+    self.size[ts] = size
+    self.inten[ts] = prec
 
+  def get_dur(self):
+    self.dur = len(self.ts)
+
+  def deltat(self,dt):
+    self.delaycloud = dt
+    self.delay = self.trackdelay+ self.delaycloud
+
+###########################################################################
 class RAIN():
    count = 0
    xs = []
