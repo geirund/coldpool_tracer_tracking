@@ -5,17 +5,22 @@
 ##########################
 # SET PATH
 #
-from='test1plus4K_ran5'  # only if rain tracking not running because tracer use the same as already traced
-JOBNAME='test1plus4K_ran7' #multismall'  #name shouldnt be too long, improve f90 
+from='test1plus4K_fin11'  # only if rain tracking not running because tracer use the same as already traced
+JOBNAME='test1plus4K_neut' #fin12' #multismall'  #name shouldnt be too long, improve f90 
 FIN=$modelo/UCLA_testdata/test1plus4K/level2/test1plus4K_budget.nc # inputfile for precipitation
 INv=/$modelo/UCLA_testdata/test1plus4K/level1/test1plus4K.out.vol.v.nc
 INu=$modelo/UCLA_testdata/test1plus4K/level1/test1plus4K.out.vol.u.nc
+domsizex=320 #  #todo: needs to be changed as input in rain tracking
+domsizey=320 #
 
-#from='lindp2K' #'test1plus4K'
-#JOBNAME='lindp2K_n' #'test1plus4K_neworder' 
+
+#from='lindp2K_13' #'test1plus4K'
+#JOBNAME='lindp2K_500tr_lvl2' #lindp2K_500tr' #'test1plus4K_neworder' 
 #FIN=/nbi/ac/conv1/henneb/Moseley2018/data/lind_p2K/lind_p2K_intensity.nc  
 #INv=/nbi/ac/conv1/henneb/Moseley2018/data/lind_p2K/lind_p2K.out.vol.v.nc
 #INu=/nbi/ac/conv1/henneb/Moseley2018/data/lind_p2K/lind_p2K.out.vol.u.nc
+#domsizex=1024 #320 #  #todo: needs to be changed as input in rain tracking
+#domsizey=1024 #320 #
 
 OUT=/nbi/ac/conv1/henneb/results/coldpool/${JOBNAME}/
 
@@ -24,19 +29,17 @@ cutoff=1.0                        # cut off for precip (mm/s)
 mincellsize=10.                              # minimum rain cell size, use 3 strings
 trackstartsize=30.                           # minimum size when trac starts
 mintracersize=50.                            # minimum size for tracer tracking 
-domsizex=320 #1024 #  #todo: needs to be changed as input in rain tracking
-domsizey=320 #1024 #
 dt=300
 res=200
-tracer=100 # 120 #100
-ntsets=2                                          # number of timesteps at which tracers are set after precip start
-alltracer=300 #(nsets +1) *tracer #600 # `expr ${ntracer} * ${ntsets}`
+tracer=50 #500 # 120 #100
+ntsets=0                                          # number of timesteps at which tracers are set after precip start
+alltracer=50 #500 #(nsets +1) *tracer #600 # `expr ${ntracer} * ${ntsets}`
 
 # alltracer=$((ntracer * ntsets))
-age=20 #30
+age=20 # 50
 rad=True
 lformat=srv #nc #srv
-lirt="copy" #"run" #'copy' 
+lirt="bl" #"run" #copy" #"run" # "run" #"run" #'copy' 
 #########################
 ### MAKE NAMELIST 
 ########################
@@ -62,7 +65,6 @@ cd ..
 ############################
 ### DIRECTORY STRUCTURE
 #############################
-mkdir -p ${OUT}
 mkdir -p ${OUT}/output/cp/
 mkdir -p ${OUT}/output/raincell
 mkdir -p ${OUT}/input/cp/
@@ -74,17 +76,21 @@ mkdir -p ${OUT}/input/raincell
 ###echo 'run raincell tracking with:' > job/${JOBNAME}.o
 ### to do: print date etc in job output
 ###
+if [ $lirt == "run" ]; then
+
 #####################################################
 ### prepare input
 ######################################################
-if [ ! -f ${OUT}/input/irt_objects_input_00.srv ]; then
+##if [ ! -f ${OUT}/input/irt_objects_input_00.srv ]; then
+# cdo -f srv selvar,r_int $FIN ${OUT}/input/raincell/irt_objects_input_00.srv
+##fi
  cdo -f srv selvar,r_int $FIN ${OUT}/input/raincell/irt_objects_input_00.srv
-fi
+ cdo -f srv selvar,conv_h_sfc $FIN ${OUT}/input/raincell/irt_objects_input_01.srv
+
 #
 #####################################################
 ### run_tracking
 #####################################################
-if [ $lirt == "run" ]; then
   ./bin/raincell/irt_objects_release.x 1
   ./bin/raincell/irt_advection_field_release.x
   ./bin/raincell/irt_tracks_release.x
@@ -114,8 +120,8 @@ fi
 
 
 
-cdo -f srv sellevel,50 ${INv} ${OUT}/input/cp/input_v.srv
-cdo -f srv sellevel,50 ${INu} ${OUT}/input/cp/input_u.srv
+#cdo -f srv sellevel,50 ${INv} ${OUT}/input/cp/input_v.srv
+#cdo -f srv sellevel,50 ${INu} ${OUT}/input/cp/input_u.srv
 #
 #
 ####################################################
@@ -123,19 +129,27 @@ cdo -f srv sellevel,50 ${INu} ${OUT}/input/cp/input_u.srv
 ###################################################
 if [ $lirt == "copy" ]; then
   rsync -r $OUT/../${from}/output/raincell $OUT/output/.
+  rsync -r $OUT/../${from}/input/raincell $OUT/output/.
   rsync -r $OUT/../${from}/input/cp $OUT/input/.
 fi 
 
-ncl path=\"${OUT}\" tr=${trackstartsize} tr2=${mintracersize} dx=${domsizex} dy=${domsizey} bin/merger.ncl #makes list of merging cold pools for special treatment
+cdo -f srv sellevel,50 ${INv} ${OUT}/input/cp/input_v.srv
+cdo -f srv sellevel,50 ${INu} ${OUT}/input/cp/input_u.srv
+
+python bin/merger.py $JOBNAME 
+echo 'python bin/merger.py' $JOBNAME
+#ncl path=\"${OUT}\" tr=${trackstartsize} tr2=${mintracersize} dx=${domsizex} dy=${domsizey} bin/merger.ncl #makes list of merging cold pools for special treatment
+#cp ${OUT}/../${from}/input/cp/mergingCPs.txt ${OUT}/input/cp/mergingCPs.txt 
 sort -n -k2 ${OUT}/output/raincell/irt_tracks_output_pure.txt > ${OUT}/input/cp/tracks_body_time_sorted.txt
-#
-#
+#cp /nbi/ac/conv1/henneb/results/coldpool/test1plus4K_finneu1/input/cp/mergingCPs.txt ${OUT}/input/cp/.
+##
+##
 ./bin/cp/tracer_tracking.x
-
-#######################
-# CLEANING
-####################
-cp -r job ${OUT}/.
-#rm info.txt
-#rm mergingCPs.txt
-
+#
+########################
+## CLEANING
+#####################
+#cp -r job ${OUT}/.
+##rm info.txt
+##rm mergingCPs.txt
+#

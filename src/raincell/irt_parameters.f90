@@ -9,7 +9,7 @@ CHARACTER(LEN=100)    :: odir
 
 LOGICAL, PARAMETER    :: lperiodic = .TRUE.
 
-INTEGER, PARAMETER    :: n_fields = 0   ! number of additional averaging fields
+INTEGER, PARAMETER    :: n_fields =1 ! nfield   ! number of additional averaging fields
 
 
 ! bins of coarse velocity field
