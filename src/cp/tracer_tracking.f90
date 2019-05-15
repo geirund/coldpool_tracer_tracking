@@ -152,7 +152,7 @@ read(100,nml=INPUTtracer)
 
 !get number of tracked precip events
 !CALL getarg(max_no_of_cells)
-OPEN(1111,FILE='na.txt')
+OPEN(1111,FILE=trim(odir) // '/input/cp/na.txt')
 READ(1111,*) max_no_of_cells
 !max_tracer_CP = nTrSet * ntset
 max_tracers = max_no_of_cells*max_tracer_CP
@@ -186,8 +186,19 @@ ALLOCATE(CPsets(max_no_of_cells,nTrSet,2,2))
 map(:,:,:) = 0
 active_cp(:) = 0
 inactiveCP(:) = 0
+CPsize(:,:) = 0
 write(*,*) 'start random fnc'
-CALL randomgrid(grdpnts)
+!CALL randomgrid(grdpnts)
+!save the random order in case the tracking will run another time on the same
+!grid size to save time
+!OPEN(1704,FILE='randomgrdpts_' // trim(str(dsize_x)),FORM='formatted',ACTION='write')
+!do i = 1,dsize_x*dsize_y
+!  write(1704,'(2(I4,2X))') grdpnts(1,i), grdpnts(2,i)
+!end do  
+OPEN(1704,FILE='randomgrdpts_' // trim(str(dsize_x)),FORM='formatted',ACTION='read')
+do i = 1,dsize_x*dsize_y
+  READ(1704,*) grdpnts(1,i), grdpnts(2,i)
+end do 
 write(*,*) 'finished random fnc'
  i =1
  OPEN(1,FILE=trim(odir) // '/input/cp/mergingCPs.txt',FORM='formatted',ACTION='read',IOSTAT=ierr) 
@@ -237,7 +248,7 @@ prec_active(:,1) = 0
 
  DO !start main loop
 ! runs until all timesteps are read, or uncomment lines below
-! IF (timestep .ge. 102) THEN !maxval(cpio(:,3),1)) then
+! IF (timestep .ge. 114) THEN !maxval(cpio(:,3),1)) then
 ! GOTO 5000
 ! END IF 
 ! only for testing
@@ -321,11 +332,13 @@ prec_active(:,1) = 0
 !  !       ! reset dummy first
            traced_dummy(:,:) = 0.
            traced_dummy = traced(i,:,:)
+           ! sort tracer by angle 
            CALL sort(traced_dummy(1:already_tracked(i),:),already_tracked(i))
   !!         if (traced(i,1,11)  .eq. 0) then !stop tracer only if precip has stoped
   !           !CALL oneside(traced_dummy(1:already_tracked(i),8),traced(i,:,:),already_tracked(i))
   !!         end if
            IF (traced(i,1,7) .lt. max_age) then
+             ! tracer and objetcts on xy grid
              CALL setongrid(traced_dummy,map(:,:,1),map(:,:,2),int(traced(i,1,9)) &
                             ,COMx(i),COMy(i)&
                             , CPinfo, max_no_of_cells,already_tracked(i))
@@ -334,7 +347,11 @@ prec_active(:,1) = 0
            END IF
          END IF
        END DO
-! get the size of the CPs
+! get the size of the CPs by counting gridpoints they occupy 
+!if (timestep .gt. 110 .and. timestep .lt. 120) then
+!  write(*,*) 'fragliche CP size 1 ', CPsize(2137,int(traced(cpio(2137,1),1,7))+1)
+!end if 
+
        do ix =1, dsize_x
          do iy =1,dsize_y
            if (map(ix,iy,1) .ne. 0 ) then
@@ -347,16 +364,46 @@ prec_active(:,1) = 0
            end if
          end do
        end do
+!if (timestep .gt. 110 .and. timestep .lt. 120 ) then
+!  write(*,*) 'fragliche CP size 2 ', CPsize(2137,int(traced(cpio(2137,1),1,7))+1), timestep
+!end if
+
 ! add the size of other part of merger if merger
        do i =1,max_no_of_cells
          if (cpio(i,1) .ne. cpio(i,2)) then
            if (cpio(i,2) .ne. 0) then
-              CPsize(cpio(i,1),:) = CPsize(cpio(i,1),:) + CPsize(cpio(i,2),:)
-              CPsize(cpio(i,2),:) = CPsize(cpio(i,1),:) !+ CPsize(cpio(i,2),:)
+! fragliche CP size
+!if (timestep .gt. 110 .and. timestep .lt. 120 .and. cpio(i,1) .eq. 2137 ) then 
+!  fragl
+!  write(*,*) '2137 to ', cpio(i,2)
+!  write(*,*) CPsize(cpio(i,1),:) , CPsize(cpio(i,2),:)
+!
+!end if
+!if (timestep .gt. 110 .and. timestep .lt. 120 .and. cpio(i,2) .eq. 2137 ) then
+!  write(*,*)  cpio(i,1), 'to 2137'
+!  write(*,*)  CPsize(cpio(i,1),:) , CPsize(cpio(i,2),:) 
+!end if
+             if (.not. int(traced(cpio(i,1),1,7)) .gt. max_age ) then
+             if (.not. int(traced(cpio(i,2),1,7)) .gt. max_age ) then
 
+              CPsize(cpio(i,1),int(traced(cpio(i,1),1,7))+1) = CPsize(cpio(i,1),int(traced(cpio(i,1),1,7))+1) &
+                                                             + CPsize(cpio(i,2),int(traced(cpio(i,2),1,7))+1)
+!              CPsize(cpio(i,2),int(traced(cpio(i,2),7))+1) = CPsize(cpio(i,1),int(traced(cpio(i,1),7))+1) !+ CPsize(cpio(i,2),:)
+              CPsize(cpio(i,2),int(traced(cpio(i,2),1,7))+1) = CPsize(cpio(i,1),int(traced(cpio(i,1),1,7))+1)
+             end if
+             end if
            end if
          end if
        end do       
+!if (timestep .gt. 110 .and. timestep .lt. 120 ) then
+!  write(*,*) 'fragliche CP size 3 ', CPsize(2137,int(traced(cpio(2137,1),1,7))+1)
+!end if
+! output of tracer before size is checked for termination
+       if (timestep .ge. onset) then
+       CALL write_output(traced,max_tracers,count_tracer,timestep,tracpo,&
+                         max_no_of_cells,COMx,COMy,traced_prev1,CPsize)
+       end if
+! check CP area for termination of CP
        do i =1,max_no_of_cells
          IF ( traced(i,1,7) .gt. 2) then ! age
           IF ( traced(i,1,7) .gt. max_age) then 
@@ -375,14 +422,17 @@ prec_active(:,1) = 0
           END IF
          END IF
        end do 
+!if (timestep .gt. 110 .and. timestep .lt. 120) then
+!  write(*,*) 'fragliche CP size 4 ', CPsize(2137,int(traced(cpio(2137,1),1,7))+1), timestep
+!end if
       CAll WRITEMAP(map(:,:,1),timestep,trim(odir) // '/output/cp/object')
       CAll WRITEMAP(map(:,:,2),timestep,trim(odir) // '/output/cp/tracer')
 
        !CALL time_dev(traced,traced_prev,max_no_of_cells,max_tracer_CP,count_tracer,tracpo,max_tracers)
-       if (timestep .ge. onset+1) then 
-       CALL write_output(traced,max_tracers,count_tracer,timestep,tracpo,&
-                         max_no_of_cells,COMx,COMy,traced_prev1,CPsize)
-       end if
+!       if (timestep .ge. onset) then 
+!       CALL write_output(traced,max_tracers,count_tracer,timestep,tracpo,&
+!                         max_no_of_cells,COMx,COMy,traced_prev1,CPsize)
+!       end if
         traced_prev2 = traced_prev1
         traced_prev1 = traced
 
@@ -1378,7 +1428,6 @@ USE cp_parameters, ONLY : dsize_x, dsize_y, max_tracer_CP
   INTEGER :: savei
   INTEGER :: firstx, firsty
 
-  !write(*,*) 'CP', CPID
   checker = 0
   counter=0
   pi = 2.*asin(1.)
@@ -1388,6 +1437,7 @@ USE cp_parameters, ONLY : dsize_x, dsize_y, max_tracer_CP
   mapmap = 0
 !  ! to find a point inside the object
 !  ! cog of precip is not always inside
+
   ! SHIFT MAP TO CENTER COG
   deltax = dsize_x/2-int(cogx)
   deltay = dsize_y/2-int(cogy)
@@ -1404,7 +1454,6 @@ USE cp_parameters, ONLY : dsize_x, dsize_y, max_tracer_CP
 
   rsave = 0.
   DO i=1,tracked !max_tracer_CP
-     IF (traced_dummy(i,7) .gt. traced_dummy(i,18)) THEN
        dumdum(c,:) = traced_dummy(i,:)  
        if (traced_dummy(i,5) .gt. rsave) then
          startc = c
@@ -1412,19 +1461,16 @@ USE cp_parameters, ONLY : dsize_x, dsize_y, max_tracer_CP
        end if
 
        c= c+1
-     END IF
-  END DO 
+  END DO
+ 
   c = c- 1
-  !write(*,*) 'hier 1'
   dum(:,:) = dumdum(:,:)
-  !write(*,*) 'hier 2'
   i =1
   savei = 0
   if (c .gt. 1) then ! at first setting no tracer for dum will be found
 !    dum(1:c-startc+1,:) = dumdum(startc:c,:)
 !    dum(c-startc+2:c,:) = dumdum(1:startc-1,:)
 !    dum(c-startc+2:,8) = dumdum(c-startc+2:,8)+2*pi
-!write(*,*) 'hier 3'
     oldx = mod(int(dum(c-1,3))-1+deltax+dsize_x,dsize_x)+1
     oldy = mod(int(dum(c-1,4))-1+deltay+dsize_y,dsize_y)+1
     firstx = oldx  ! gp to which gap is closed the first time
@@ -1450,7 +1496,6 @@ USE cp_parameters, ONLY : dsize_x, dsize_y, max_tracer_CP
       y = mod(int(dum(i,4))-1+deltay+dsize_y,dsize_y)+1
 !      IF (maptr(x,y) .eq. 0 .or. maptr(x,y) .eq. CPID) THEN
 !        IF (int(dum(i,3)) .ne. 0 .and. int(dum(i,4)) .ne. 0) THEN
-          IF (dum(i,7) .gt. dum(i,18)) THEN ! .or. dum(i,7) .lt. 2) THEN
             IF (maptr2(x,y) .ne. CPID) THEN
               centerx = (centerx * counter +x)/(counter+1)
               centery = (centery * counter +y)/(counter+1)
@@ -1500,7 +1545,6 @@ USE cp_parameters, ONLY : dsize_x, dsize_y, max_tracer_CP
               CALL filltracer(xtemp,ytemp,x,y,maptr, maptr2,maptr3, CPID, &
                       centerx, centery, counter, checker) 
              end if ! end neighb yes or no
-           END IF       
 !         END IF
 !        END IF
         oldx = x
@@ -1520,6 +1564,7 @@ USE cp_parameters, ONLY : dsize_x, dsize_y, max_tracer_CP
 
   d = 0
 
+! fill out the object 
   CALL getobj(maptr3,CPID,maptr,ii,ij,d)
 
 ! if object exceed domain boundaries, all gp are filled and map needs to be set
@@ -1527,12 +1572,6 @@ USE cp_parameters, ONLY : dsize_x, dsize_y, max_tracer_CP
   if ( ALL( maptr==CPID ) ) then
     maptr(:,:) = maptr2
   end if
-
-! not neccessary any more
-!  if (ANY(maptr(1:2,:) .eq. CPID)) maptr(:,:) = maptr2
-!  if (ANY(maptr(dsize_x-2:dsize_x,:) .eq. CPID)) maptr(:,:) = maptr2
-!  if (ANY(maptr(:,1:2) .eq. CPID)) maptr(:,:) = maptr2
-!  if (ANY(maptr(:,dsize_y-2:dsize_y) .eq. CPID)) maptr(:,:) = maptr2
 
 ! just to controll where centers are placed
   maptr2(int(centerx),int(centery)) = -2
@@ -1769,9 +1808,9 @@ USE  cp_parameters, ONLY :max_tracer_CP, dsize_x, dsize_y,odir !, max_age
   ! updating previous tracers
 write(*,*) 'write '
   DO WHILE (it .LT. count_tracer)
-    IF (int(traced(tracpo(1,it),tracpo(2,it),11))  .eq. 1) THEN  !trace only if tracer is active
+    IF (int(traced_prev1(tracpo(1,it),tracpo(2,it),11))  .eq. 1) THEN  !trace only if tracer is active
       !IF(INT(trace9(tracpo(1,it),tracpo(2,it),7)) .le. max_age)then   ! output only up to  3hours
-      IF (INT(traced_prev1(tracpo(1,it),tracpo(2,it),12)) .ne. 0) then
+!      IF (INT(traced_prev1(tracpo(1,it),tracpo(2,it),12)) .ne. 0) then
 !write(*,*) it
 !write(*,*) tracpo(1,it), tracpo(2,it)
 !write(*,*) tracpo(1,it),INT(traced_prev1(tracpo(1,it),tracpo(2,it),7))
@@ -1810,7 +1849,7 @@ write(*,*) 'write '
                         sizeCP(tracpo(1,it),INT(traced_prev1(tracpo(1,it),tracpo(2,it),7)+1))  !INT(traced_prev1(tracpo(1,it),tracpo(2,it),18))   !timestepsset after precip start
 
         END IF 
-      END IF          
+!      END IF          
     !   END IF
     END IF
     it = it+1
