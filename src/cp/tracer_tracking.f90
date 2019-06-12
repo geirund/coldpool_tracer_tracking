@@ -1,17 +1,58 @@
 !TODOES!!
-! - when a precip has merged into another, change its ID 
 ! - fix if CP has a continues line trough its self (happens when merging eg CP
-! - INCLUDE CONSTRAIN THAT NEXT CLOSER cp MUST HAVE LARGER RADIUS THAN THE ONE
-! WHICH WAS SKIPPED
-! 41 in small data set
+!**************************************************************************************
 ! 2018 Sep 08 O Henneb
-! read rain tracking output txt for COGs (loop trough every line)
+! SUBROUTINE randomgrid   defines a random order to place tracer at the boundary
+!                         cells of precipitation because not as many tracers are
+!                         placed as count of grid cells at the boundary of
+!                         precip object (or other tracke field)!   
+! read precip. (or other) tracking output (txt) for COGs (loops trough every line)
 ! read 2D velocity field (time-stepwise)
 ! read rain track cells for precipitation boundaries (timestepwise)
-! SUBROUTINE neigh idetifies precipitation boundaries
-! SUBROUTINE set_tracer sets tracer at the boundaries
-! SUBROUTINE ....
-! SUBROUTINE ... 
+! SUBROUTINE neigh        identifies precipitation boundaries        !not in use
+! SUBROUTINE neigh2       as neigh but considers constant number of tracers       
+! SUBROUTINE set_tracer   sets tracer at the boundaries              !not in use
+! SUBROUTINE set_tracer2  as set_tracer but considers constant number of tracers
+!                         tracers around a precip. object are placed a single
+!                         timestep, that needs to be given in file
+!                         /input/cp/mergingCPs.txt
+! SUBROUTINE update_newtracer 
+!                         advection of newly set tracers, along interpolated
+!                         windfield with subtimestepping
+! SUBROUTINE velocity_interpol 
+!                         interpolates velcoities at current timestep to write
+!                         in output, output variables are written in variable traced(:,:,:)
+! SUBROUTINE geometry     calculates position of tracer in spherical cordinates
+!                         (angle and distance), angle is needed for object
+!                         identification
+!                         relative to its center (COG of precip) for output
+! SUBROUTINE radvel       calclulates radial velocity component (along the
+!                         vector connecting tracer location and CP center) for
+!                         output
+! loop trough all existing CPs at current timestep to identify the object and if
+! neccessary terminate CP (CPs are terminating when they reduce in size by more
+! than 60% of its so fare reached maximum extent)
+! SUBROUTINE sort         puts all tracers belonging to the same CP in order of
+!                         increasing angle (calculated from geometry)
+! SUBROUTINE setongrid    associates the tracer position to the averaged
+!                         gridpoint and prepares output on 2D field for tracer
+!                         for gridcells occupied by tracer, CP outlines and CP
+!                         objects, calls routines filltracer and getobj
+! SUBROUTINE filltracer   fills gaps of empty gridcells in the circulference
+!                         build by tracres around the CP
+! SUBROUTINE getobj       get the object (fill out the circumferences idetified
+!                         by filltracer
+! calculate CP size based on number of GP occupied by CP object
+! SUBROUTINE write_output writes output to textfile
+! check area change to previous timestep and terminate for next timestep if CP reduces too much in
+! CP area
+! SUBROUTINE WRITEMAP    write 2D field nc-data of CP objects and outlines
+! SUBROUTINE update_tracer  
+!                        calculates new position of tracer by advecting by
+!                        interpolated wind field (includes subtimestepping)
+
+
+!*************************************************************************************
 ! 
 ! 2018 Oct:
 ! change initial tracer placement from precip boundary to circles
@@ -73,6 +114,10 @@
 ! coldpools terminate when they reduce in sice for two timesteps (smaller than
 ! 0.8 * max size
 ! CParea overwrites previous CPs if they are older
+!
+! 2019 Mai
+! switch order of geometry and update of new seeded tracer to make output
+! consistence
 !
 ! OUTPUT: 
 ! traced(CP-ID,int tracer ID, property) 
@@ -204,9 +249,8 @@ write(*,*) 'finished random fnc'
  OPEN(1,FILE=trim(odir) // '/input/cp/mergingCPs.txt',FORM='formatted',ACTION='read',IOSTAT=ierr) 
  IF ( ierr == 0) then
    DO i =1, max_no_of_cells,1
-write(*,*) i
+     !                 track ID , track ID merging into, starttime of CP
      READ(1,*,END=400) cpio(i,1), cpio(i,2), cpio(i,3)
-write(*,*) cpio(i,1), cpio(i,2), cpio(i,3)
    END DO
  ELSE 
      write(*,*) 'Beim Oeffnen der Datei ist ein Fehler Nr.', ierr,' aufgetreten'
@@ -306,6 +350,10 @@ prec_active(:,1) = 0
       ! this routine might be rewriten that it can be called in set_tracer
        CALL set_tracer2(max_no_of_cells,cpio,traced,count_tracer,counter,CPsets,&
                         timestep,active_CP,tracpo,max_tracers,already_tracked,CPinfo)
+        CALL update_newtracer(vel(:,:,1),vel(:,:,2),timestep,traced,count_tracer,&
+                          max_no_of_cells,tracpo,max_tracers)
+
+
        !CALL neigh(track_numbers,nneighb)
        !CALL set_tracer(nneighb, track_numbers,max_no_of_cells, timestep,traced,&
        !            count_tracer,already_tracked,tracpo,max_tracers,cpio(:,1:2))
@@ -320,8 +368,6 @@ prec_active(:,1) = 0
        CALL radvel(traced,already_tracked,max_no_of_cells)
        ! new circular tracer should imeditly be updated untill they match with
        ! previous tracer, sont have neg rad vel
-        CALL update_newtracer(vel(:,:,1),vel(:,:,2),timestep,traced, count_tracer,&
-                          max_no_of_cells,tracpo,max_tracers)
   
        DO i =1,max_no_of_cells ! loop trough all cps with tracer
          if (prec_active(i,1) .eq. 0 & ! precip has terminated
@@ -348,9 +394,6 @@ prec_active(:,1) = 0
          END IF
        END DO
 ! get the size of the CPs by counting gridpoints they occupy 
-!if (timestep .gt. 110 .and. timestep .lt. 120) then
-!  write(*,*) 'fragliche CP size 1 ', CPsize(2137,int(traced(cpio(2137,1),1,7))+1)
-!end if 
 
        do ix =1, dsize_x
          do iy =1,dsize_y
@@ -364,25 +407,11 @@ prec_active(:,1) = 0
            end if
          end do
        end do
-!if (timestep .gt. 110 .and. timestep .lt. 120 ) then
-!  write(*,*) 'fragliche CP size 2 ', CPsize(2137,int(traced(cpio(2137,1),1,7))+1), timestep
-!end if
 
 ! add the size of other part of merger if merger
        do i =1,max_no_of_cells
          if (cpio(i,1) .ne. cpio(i,2)) then
            if (cpio(i,2) .ne. 0) then
-! fragliche CP size
-!if (timestep .gt. 110 .and. timestep .lt. 120 .and. cpio(i,1) .eq. 2137 ) then 
-!  fragl
-!  write(*,*) '2137 to ', cpio(i,2)
-!  write(*,*) CPsize(cpio(i,1),:) , CPsize(cpio(i,2),:)
-!
-!end if
-!if (timestep .gt. 110 .and. timestep .lt. 120 .and. cpio(i,2) .eq. 2137 ) then
-!  write(*,*)  cpio(i,1), 'to 2137'
-!  write(*,*)  CPsize(cpio(i,1),:) , CPsize(cpio(i,2),:) 
-!end if
              if (.not. int(traced(cpio(i,1),1,7)) .gt. max_age ) then
              if (.not. int(traced(cpio(i,2),1,7)) .gt. max_age ) then
 
@@ -395,9 +424,6 @@ prec_active(:,1) = 0
            end if
          end if
        end do       
-!if (timestep .gt. 110 .and. timestep .lt. 120 ) then
-!  write(*,*) 'fragliche CP size 3 ', CPsize(2137,int(traced(cpio(2137,1),1,7))+1)
-!end if
 ! output of tracer before size is checked for termination
        if (timestep .ge. onset) then
        CALL write_output(traced,max_tracers,count_tracer,timestep,tracpo,&
@@ -422,9 +448,6 @@ prec_active(:,1) = 0
           END IF
          END IF
        end do 
-!if (timestep .gt. 110 .and. timestep .lt. 120) then
-!  write(*,*) 'fragliche CP size 4 ', CPsize(2137,int(traced(cpio(2137,1),1,7))+1), timestep
-!end if
       CAll WRITEMAP(map(:,:,1),timestep,trim(odir) // '/output/cp/object')
       CAll WRITEMAP(map(:,:,2),timestep,trim(odir) // '/output/cp/tracer')
 
@@ -463,9 +486,9 @@ CONTAINS
 !subroutines for reading and writing netcdf
 ! -----------------------------------------------------------------------
 
-!! -----------------------------------------------------------------------
-!! input 2D nc data
-!! -----------------------------------------------------------------------
+! -----------------------------------------------------------------------
+! input 2D nc data
+! -----------------------------------------------------------------------
   SUBROUTINE read_nc_2D (poutput,varname, filename,ctime)
 
   IMPLICIT NONE
@@ -487,6 +510,9 @@ CONTAINS
 !
   END SUBROUTINE read_nc_2D
 
+! -----------------------------------------------------------------------
+! output 2D nc data
+! -----------------------------------------------------------------------
   SUBROUTINE WRITEMAP(map,t,FILE_NAME2)
   USE cp_parameters, ONLY : dsize_x, dsize_y
   
@@ -510,6 +536,9 @@ CONTAINS
     call check( nf90_close(ncid) )
   END SUBROUTINE WRITEMAP
 
+! -----------------------------------------------------------------------
+! function to shorten characters for output names
+! -----------------------------------------------------------------------
 character(len=20) function str(k)
 !   "Convert an integer to string."
     integer, intent(in) :: k
@@ -518,6 +547,7 @@ character(len=20) function str(k)
     str = adjustl(str)
 
 end function str
+
 !---------------------------------------------------
 ! CHECK NETCD DATA
 !--------------------------------------------------
@@ -531,9 +561,6 @@ end function str
     end if
   END SUBROUTINE check
 
-!--------------------------------------------------
-
-!++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 !--------------------------------------------------
 ! this routine is replaced by initCircle 
 !--------------------------------------------------
@@ -567,6 +594,9 @@ SUBROUTINE neigh(track_numbers,nneighb)
   END DO
 END SUBROUTINE neigh
 
+!--------------------------------------------------
+! calcualtes a random order (can make the programm very slow)
+!--------------------------------------------------
 SUBROUTINE randomgrid(grdpnts)
   USE cp_parameters, ONLY : dsize_x, dsize_y
   INTEGER, INTENT(OUT) :: grdpnts(2,dsize_x * dsize_y)
@@ -602,6 +632,10 @@ SUBROUTINE randomgrid(grdpnts)
   END DO
 END SUBROUTINE randomgrid
 
+!--------------------------------------------------
+! identifies the outer gridcells of an object and accounts for a constarined
+! number of tracers which can be placed 
+!--------------------------------------------------
 SUBROUTINE neigh2(track_numbers,max_no_of_cells,grdpnts,CPsets, counter)
   USE cp_parameters, ONLY : dsize_x, dsize_y, nTrSet
   IMPLICIT NONE
@@ -641,6 +675,9 @@ SUBROUTINE neigh2(track_numbers,max_no_of_cells,grdpnts,CPsets, counter)
   END DO
 END SUBROUTINE neigh2
 
+!--------------------------------------------------
+! calculates the maximum radius of object for init circle
+!--------------------------------------------------
 SUBROUTINE maxcell(track_numbers,COMx,COMy,rmax,max_no_of_cells)
   USE cp_parameters, ONLY : dsize_x, dsize_y
   IMPLICIT NONE
@@ -664,6 +701,7 @@ SUBROUTINE maxcell(track_numbers,COMx,COMy,rmax,max_no_of_cells)
     END DO
   END DO
 END SUBROUTINE maxcell
+
 !--------------------------------------------------------------------------------------
 ! Calculate  circle around COG dependent on size for initial tracer placement
 ! replaces routine neighbours
@@ -732,6 +770,7 @@ SUBROUTINE initCircle(max_no_of_cells,ts,traced, COMx,COMy, &
 !    end if
 !  end do
 END SUBROUTINE 
+
 !--------------------------------------------------------------------------------------
 ! SET TRACER at their initial position acording to precipitation outlines
 !-----------------------------------------------------------------------------------
@@ -915,7 +954,7 @@ USE cp_parameters, ONLY : dsize_x, dsize_y,max_tracer_CP
 END SUBROUTINE set_tracer
 
 !--------------------------------------------------------------------------------------
-! UPDATE TRACER along the horizontal wind field
+! interpolates wind field
 !-----------------------------------------------------------------------------------
 SUBROUTINE velocity_interpol(velx,vely,timestep,traced, count_tracer,max_no_of_cells,tracpo,max_tracers)
 USE cp_parameters, ONLY : dsize_x, dsize_y, max_tracer_CP
@@ -990,7 +1029,11 @@ USE cp_parameters, ONLY : dsize_x, dsize_y, max_tracer_CP
   RETURN
 END SUBROUTINE velocity_interpol 
 
-
+!--------------------------------------------------------------------------------------
+! UPDATE newly set TRACER, to avoid having tracers in output which mark the
+! ouline of the precipitation cell (or any other initally tracked field) instead
+! of matching the convergence lines
+!-----------------------------------------------------------------------------------
 SUBROUTINE update_newtracer(velx,vely,timestep,traced, count_tracer,max_no_of_cells,tracpo,max_tracers)
 !OCH TO DO: dt and resolution should be parameter read by USE from module
 USE cp_parameters, ONLY : dsize_x, dsize_y, res, max_tracer_CP
@@ -1091,7 +1134,9 @@ USE cp_parameters, ONLY : dsize_x, dsize_y, res, max_tracer_CP
   RETURN
 END SUBROUTINE update_newtracer
 
-
+!--------------------------------------------------------------------------------------
+! UPDATE TRACER along the horizontal wind field
+!-----------------------------------------------------------------------------------
 SUBROUTINE update_tracer(velx,vely,timestep,traced, count_tracer,max_no_of_cells,tracpo,max_tracers, &
                          CPinfo)
 !OCH TO DO: dt and resolution should be parameter read by USE from module
@@ -1328,6 +1373,7 @@ END SUBROUTINE radvel
 ! --------------------------------------------------------------------------------------
 ! Update tracer along radial direction
 !-----------------------------------------------------------------------------------
+! not useable at the moment, programm changed too much
 SUBROUTINE radial_update(timestep,traced,count_tracer,max_no_of_cells,tracpo,max_tracers)
 USE cp_parameters, ONLY : dsize_x, dsize_y, res, dt, max_tracer_CP
   INTEGER, INTENT(IN)       :: timestep,max_no_of_cells, max_tracers
@@ -1370,6 +1416,7 @@ USE cp_parameters, ONLY : dsize_x, dsize_y, res, dt, max_tracer_CP
    ENDDO
   RETURN
 END SUBROUTINE radial_update
+
 ! --------------------------------------------------------------------------------------
 ! SORT traced 
 !-----------------------------------------------------------------------------------
@@ -1407,6 +1454,10 @@ SUBROUTINE sort(traced_dummy,jc)
  200 FORMAT   (2(2X,I4) ,   3(2X,F11.5), 2X,F5.3, 2(2X,F11.3))
 
 END SUBROUTINE sort
+
+!--------------------------------------------------------------------------------------
+! output of tracer position in 2D nc field and calculation ov CP object
+!-----------------------------------------------------------------------------------
 SUBROUTINE setongrid(traced_dummy,map,map2,CPID,cogx,cogy,CPinfo,max_no_of_cells,tracked)
 USE cp_parameters, ONLY : dsize_x, dsize_y, max_tracer_CP
   INTEGER,INTENT(INOUT) :: map(dsize_x, dsize_y),map2(dsize_x,dsize_y)
@@ -1711,9 +1762,11 @@ c = 0
 objectout(:,:) = CPID
 100 CONTINUE
 END SUBROUTINE getobj
+
 ! --------------------------------------------------------------------------------------
 ! STOP CP when all tracer are on the same side of the COG  
 !-----------------------------------------------------------------------------------
+! not used anymore
 SUBROUTINE oneside(tdummy,traced,tracked_no)
 
 USE  cp_parameters, ONLY :max_tracer_CP
@@ -1754,6 +1807,7 @@ END SUBROUTINE oneside
 ! --------------------------------------------------------------------------------------
 ! STOP tarcer, when they accelerate after decelerating previously 
 !-----------------------------------------------------------------------------------
+! has never been used
 SUBROUTINE time_dev(traced,traced_prev,max_no_of_cells,count_tracer,tracpo,max_tracers)
 USE  cp_parameters, ONLY :max_tracer_CP
   REAL, INTENT(INOUT)       :: traced(max_no_of_cells, max_tracer_CP,20)
@@ -1779,6 +1833,9 @@ USE  cp_parameters, ONLY :max_tracer_CP
    END DO 
 END SUBROUTINE
 
+!------------------
+!
+!------------------
 SUBROUTINE write_output(traced,max_tracers,count_tracer,timestep,tracpo,&
                        max_no_of_cells,COMx,COMy,traced_prev1,sizeCP)
 USE  cp_parameters, ONLY :max_tracer_CP, dsize_x, dsize_y,odir !, max_age

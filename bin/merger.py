@@ -91,7 +91,10 @@ for ID in endObjp1.keys():
       if endObjp1[ID] == 0: # no following object to this track -> not merging into another
         merger[ID] = ID
       else:
-        merger[ID] =  TrackID_forObj[endObjp1[ID] ]  # t
+        if endObjp1[ID] not in TrackID_forObj.keys():
+          merger[ID] = 0
+        else:
+          merger[ID] =  TrackID_forObj[endObjp1[ID] ]  # t
 
 
 
