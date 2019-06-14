@@ -233,18 +233,21 @@ active_cp(:) = 0
 inactiveCP(:) = 0
 CPsize(:,:) = 0
 write(*,*) 'start random fnc'
-!CALL randomgrid(grdpnts)
+CALL randomgrid(grdpnts)
 !save the random order in case the tracking will run another time on the same
 !grid size to save time
-!OPEN(1704,FILE='randomgrdpts_' // trim(str(dsize_x)),FORM='formatted',ACTION='write')
-!do i = 1,dsize_x*dsize_y
-!  write(1704,'(2(I4,2X))') grdpnts(1,i), grdpnts(2,i)
-!end do  
-OPEN(1704,FILE='randomgrdpts_' // trim(str(dsize_x)),FORM='formatted',ACTION='read')
+OPEN(1704,FILE='randomgrdpts_' // trim(str(dsize_x)),FORM='formatted',ACTION='write')
 do i = 1,dsize_x*dsize_y
-  READ(1704,*) grdpnts(1,i), grdpnts(2,i)
-end do 
+  write(1704,'(2(I4,2X))') grdpnts(1,i), grdpnts(2,i)
+end do  
 write(*,*) 'finished random fnc'
+
+!if random order already exist ....
+!OPEN(1704,FILE='randomgrdpts_' // trim(str(dsize_x)),FORM='formatted',ACTION='read')
+!do i = 1,dsize_x*dsize_y
+!  READ(1704,*) grdpnts(1,i), grdpnts(2,i)
+!end do 
+!write(*,*) 'read random '
  i =1
  OPEN(1,FILE=trim(odir) // '/input/cp/mergingCPs.txt',FORM='formatted',ACTION='read',IOSTAT=ierr) 
  IF ( ierr == 0) then
@@ -260,6 +263,7 @@ write(*,*) 'read data'
 OPEN(2,FILE=trim(odir) // '/output/raincell/irt_tracks_mask.srv',    FORM='unformatted', ACTION='read')
 OPEN(40,FILE=trim(odir) // '/output/cp/coldpool_tracer_out_all.txt',FORM='formatted', ACTION='write')
 OPEN(41,FILE=trim(odir) //'/output/cp/coldpool_tracer_out.txt',FORM='formatted', ACTION='write')
+
 
 if (trim(lformat) == 'srv') then
   OPEN(4,FILE=trim(odir) // '/input/cp/input_u.srv',FORM='unformatted',ACTION='read')
@@ -337,10 +341,10 @@ prec_active(:,1) = 0
      END DO ! all COGs for this timestep are read
      ! reading velocity field and passive tracer
      ! reading the track input files
-     if (trim(lformat) == 'srv') then
+     !if (trim(lformat) == 'srv') then
        READ(2,END=200) srv_header_input
        READ(2) track_numbers(:,:)
-     end if
+     !end if
 
 !! start when first precip appears
      IF (timestep .GE. onset) THEN 
@@ -498,6 +502,7 @@ CONTAINS
   integer :: ncId, rhVarId, nx, ny, nz, nt
   integer, dimension(nf90_max_var_dims) :: dimIDs
 !  real, allocatable, dimension(:,:,:) ::  zvar
+    CALL check(nf90_open(filename, nf90_NoWrite, ncid))
     CALL check(nf90_inq_varid(ncid,varname, rhVarId))
     CALL check(nf90_inquire_variable(ncid, rhVarId, dimids = dimIDs))
     CALL check(nf90_inquire_dimension(ncid, dimIDs(4), len = nt))
@@ -863,7 +868,7 @@ INTEGER :: setn,plus,i,j,ii,cc
         traced(i,1+plus:plus+nTrSet,12) = cpio(i,2)
         !tracpo(1,already_tracked(i)+1-nTrSet:count_tracer) = i
         !tracpo(2,already_tracked(i)+1-nTrSet:count_tracer) = (/(j, j=1+plus,plus+nTrSet )/)
-
+write(*,*) count_tracer , nTrSet
         tracpo(1,count_tracer+1-nTrSet:count_tracer) = i
         tracpo(2,count_tracer+1-nTrSet:count_tracer) = (/(j, j =1+plus,plus+nTrSet )/)
       END IF !timestep within the timerange when tracers shell be set for thisCP

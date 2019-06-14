@@ -19,8 +19,8 @@ OUT=/nbi/ac/conv1/henneb/results/coldpool/${JOBNAME}/
 ## SET PARAMETER
 cutoff=0.02                                     # cut off for precip (mm/s)
 mincellsize=30.                              # minimum rain cell size, use 3 strings
-trackstartsize=30.                           # minimum size when trac starts
-mintracersize=50.                            # minimum size for tracer tracking 
+trackstartsize=30.  #unwichtig                         # minimum size when trac starts
+mintracersize=50.   # unwichtig                         # minimum size for tracer tracking 
 dt=360
 res=200
 tracer=500                                   # number of tracer per CP
