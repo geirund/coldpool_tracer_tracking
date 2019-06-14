@@ -1,0 +1,127 @@
+#!/bin/bash
+
+##########################
+# INPUT SETTINGS
+##########################
+# SET PATH
+#
+
+from='Gesatest3' #'test1plus4K'
+JOBNAME='Gesatest_all3' #indp2K_500tr_neu2' 
+FIN=$modelo/COSMO_LES_ACCACIA/organisationssim/accacia_oceancase_varfluxes_CCNfixed_large_night/totprec_merged_newdim.nc #totprec_merged_nodim.nc
+INv=$modelo/COSMO_LES_ACCACIA/organisationssim/accacia_oceancase_varfluxes_CCNfixed_large_night/vwind_merged.nc
+INu=$modelo/COSMO_LES_ACCACIA/organisationssim/accacia_oceancase_varfluxes_CCNfixed_large_night/uwind_merged.nc
+domsizex=350 #1024 #320 #  #todo: needs to be changed as input in rain tracking
+domsizey=350 #1024 #320 #
+
+OUT=/nbi/ac/conv1/henneb/results/coldpool/${JOBNAME}/
+
+## SET PARAMETER
+cutoff=0.02                                     # cut off for precip (mm/s)
+mincellsize=30.                              # minimum rain cell size, use 3 strings
+trackstartsize=30.                           # minimum size when trac starts
+mintracersize=50.                            # minimum size for tracer tracking 
+dt=360
+res=200
+tracer=500                                   # number of tracer per CP
+alltracer=500                                # alt aus einer version als ich zu mehrern zeitschritten tarcer gesetzt habe 
+
+age=50                                       # Max age of CPs
+lformat=nc #srv
+lirt="run" #"link" #"copy" # "run" #"run" #'copy' 
+
+############################
+### DIRECTORY STRUCTURE
+#############################
+mkdir -p ${OUT}/output/cp/
+mkdir -p ${OUT}/output/raincell
+mkdir -p ${OUT}/input/cp/
+mkdir -p ${OUT}/input/raincell
+mkdir -p ${OUT}/job
+
+#########################
+### MAKE NAMELIST 
+########################
+     sed \
+        -e s%@{nx}%${domsizex}%g \
+        -e s%@{ny}%${domsizey}%g \
+        -e s%@{dto}%${dt}%g \
+        -e s%@{dx}%${res}%g \
+        -e s%@{cutoff}%${cutoff}%g \
+        -e s%@{mincellsize}%${mincellsize}%g \
+        -e s%@{OUT}%${OUT}%g \
+        -e s%@{tracer}%${tracer}%g \
+        -e s%@{age}%${age}%g \
+        -e s%@{radv}%${radv}%g\
+        -e s%@{ntset}%${ntsets}%g\
+        -e s%@{alltracer}%${alltracer}%g\
+        -e s%@{lformat}%${lformat}%g\
+       <namelist.tmp>${OUT}/job/namelist.dat
+cd ..
+startdir=$(pwd)
+#echo $startdir
+echo 'made directory structure ' $JOBNAME
+cd ${OUT} 
+#############################
+##### JOB OUTPUT 
+############################
+###echo 'run raincell tracking with:' > job/${JOBNAME}.o
+### to do: print date etc in job output
+###
+if [ $lirt == "run" ]; then
+
+#####################################################
+### prepare input
+######################################################
+# cdo sellevidx,8 -selvar,moisture_divergence $FIN ${OUT}/input/raincell/irt_objects_input_00.nc
+# cdo selvar,TOT_PREC $FIN ${OUT}/input/raincell/irt_objects_input_00.nc
+
+# sorry etwas unschoen aber im code steht der Variablenname "T" noch hardcoded drinne, deshalb bennen sich die hier mal um
+# ncrename -v moisture_divergence,T ${OUT}/input/raincell/irt_objects_input_00.nc ${OUT}/input/raincell/irt_objects_input_00.nc 
+#ncrename -v TOT_PREC,T ${OUT}/input/raincell/irt_objects_input_00.nc ${OUT}/input/raincell/irt_objects_input_00.nc
+#cp $FIN ${OUT}/input/raincell/irt_objects_input_00.nc 
+cp $OUT/../${from}/input/raincell/irt_objects_input_00.nc ${OUT}/input/raincell/irt_objects_input_00.nc  
+#
+#####################################################
+### run_tracking
+####################################################
+  ${startdir}/bin/raincell/irt_objects_release.x 1
+  ${startdir}/bin/raincell/irt_advection_field_release.x
+  ${startdir}/bin/raincell/irt_tracks_release.x
+  sort -n -k2 ${OUT}/output/raincell/irt_tracks_nohead_output.txt > ${OUT}/output/raincell/irt_tracks_sorted.txt
+  ${startdir}/bin/raincell/irt_trackmask_release.x
+
+  cdo -f nc copy ${OUT}/output/raincell/irt_objects_mask.srv ${OUT}/output/raincell/irt_objects_mask.nc
+  cdo -f nc copy ${OUT}/output/raincell/irt_tracks_mask.srv ${OUT}/output/raincell/irt_tracks_mask.nc
+
+  ncl path=\"${OUT}/output/raincell/\" ${startdir}/bin/fill_tracks.ncl
+
+###################################################
+# prepare input for cold pool tracking 
+##################################################
+#
+  ${startdir}/bin/cut.bsh ${OUT} # cuts the header and body to separate files
+  sort -n -k2 ${OUT}/output/raincell/headerfile.txt > ${OUT}/input/cp/irt_tracks_header_sorted.txt
+  sort -n -k2 ${OUT}/output/raincell/irt_tracks_output_pure.txt > ${OUT}/output/raincell/irt_tracks_output_pure_sort.txt
+  sort -n -k2 ${OUT}/output/raincell/irt_tracks_output_pure.txt > ${OUT}/input/cp/tracks_body_time_sorted.txt
+#echo 'run raintrackig ' $JOBNAME 
+fi 
+
+cdo sellevidx,90 ${INv} ${OUT}/input/cp/input_v.nc
+cdo sellevidx,90 ${INu} ${OUT}/input/cp/input_u.nc
+
+python ${startdir}/bin/merger_Gesa.py $JOBNAME
+sort -n -k2 ${OUT}/output/raincell/irt_tracks_output_pure.txt > ${OUT}/input/cp/tracks_body_time_sorted.txt
+
+#  cp $OUT/../${from}/randomgrdpts_1024 $OUT/.
+
+${startdir}/bin/cp/tracer_tracking.x
+echo $JOBNAME
+#
+########################
+## CLEANING
+#####################
+#cp -r job ${OUT}/.
+##rm info.txt
+##rm mergingCPs.txt
+#
