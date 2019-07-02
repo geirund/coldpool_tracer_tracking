@@ -185,6 +185,7 @@ INTEGER,ALLOCATABLE  :: CPsize(:,:)
 INTEGER, ALLOCATABLE :: prec_active(:,:)
 INTEGER, ALLOCATABLE :: CPsets(:,:,:,:)
 INTEGER, ALLOCATABLE :: counter(:,:), grdpnts(:,:)
+REAL                 :: size_frac
 !INITIALIZE some values
 namelist /INPUTgeneral/ dsize_x, dsize_y, dt, res
 namelist /INPUTtracer/ max_tracer_CP, nTrSet, ntset, max_age, rad, lformat
@@ -232,22 +233,23 @@ map(:,:,:) = 0
 active_cp(:) = 0
 inactiveCP(:) = 0
 CPsize(:,:) = 0
+size_frac = 0
 write(*,*) 'start random fnc'
-CALL randomgrid(grdpnts)
+!CALL randomgrid(grdpnts)
 !save the random order in case the tracking will run another time on the same
 !grid size to save time
-OPEN(1704,FILE='randomgrdpts_' // trim(str(dsize_x)),FORM='formatted',ACTION='write')
-do i = 1,dsize_x*dsize_y
-  write(1704,'(2(I4,2X))') grdpnts(1,i), grdpnts(2,i)
-end do  
-write(*,*) 'finished random fnc'
+!OPEN(1704,FILE='randomgrdpts_' // trim(str(dsize_x)),FORM='formatted',ACTION='write')
+!do i = 1,dsize_x*dsize_y
+!  write(1704,'(2(I4,2X))') grdpnts(1,i), grdpnts(2,i)
+!end do  
+!write(*,*) 'finished random fnc'
 
 !if random order already exist ....
-!OPEN(1704,FILE='randomgrdpts_' // trim(str(dsize_x)),FORM='formatted',ACTION='read')
-!do i = 1,dsize_x*dsize_y
-!  READ(1704,*) grdpnts(1,i), grdpnts(2,i)
-!end do 
-!write(*,*) 'read random '
+OPEN(1704,FILE='randomgrdpts_' // trim(str(dsize_x)),FORM='formatted',ACTION='read')
+do i = 1,dsize_x*dsize_y
+  READ(1704,*) grdpnts(1,i), grdpnts(2,i)
+end do 
+write(*,*) 'read random '
  i =1
  OPEN(1,FILE=trim(odir) // '/input/cp/mergingCPs.txt',FORM='formatted',ACTION='read',IOSTAT=ierr) 
  IF ( ierr == 0) then
@@ -263,7 +265,9 @@ write(*,*) 'read data'
 OPEN(2,FILE=trim(odir) // '/output/raincell/irt_tracks_mask.srv',    FORM='unformatted', ACTION='read')
 OPEN(40,FILE=trim(odir) // '/output/cp/coldpool_tracer_out_all.txt',FORM='formatted', ACTION='write')
 OPEN(41,FILE=trim(odir) //'/output/cp/coldpool_tracer_out.txt',FORM='formatted', ACTION='write')
-
+!output form termination size of CP
+OPEN(1706,FILE=trim(odir) //'/output/cp/termination.txt',FORM='formatted',ACTION='write')
+190 FORMAT (2(I8),  2X,F5.3 , 2X,F4.0 , 2X,I6)
 
 if (trim(lformat) == 'srv') then
   OPEN(4,FILE=trim(odir) // '/input/cp/input_u.srv',FORM='unformatted',ACTION='read')
@@ -444,8 +448,13 @@ prec_active(:,1) = 0
                   if (inactiveCP(int(traced(i,1,9))) .eq. 2) then
                     traced(i,:,11) = 0  ! set cold pool inactive
                     write(*,*) 'set ', i,'inactive at an age of ', traced(i,1,7)
+                    size_frac = float(CPsize(i,int(traced(i,1,7)+1)))/float(maxval(CPsize(i,:)))
+                    WRITE(1706,190) CPsize(i,int(traced(i,1,7)+1)), CPsize(i,int(traced(i,1,7))), &
+                                    size_frac, traced(i,1,7), timestep
+                                     
                   end if
            END IF
+
            IF (CPsize(i,int(traced(i,1,7)+1)) .lt. 50) then 
              traced(i,:,11) = 0  ! set cold pool inactive
            END IF
@@ -977,10 +986,7 @@ USE cp_parameters, ONLY : dsize_x, dsize_y, max_tracer_CP
   INTEGER                   :: ix_l, iy_l, ix_r, iy_r
   REAL                      :: wgt_x, wgt_y, wgt_xt, wgt_yt
   INTEGER, INTENT(IN)       :: tracpo(2,max_tracers)
-  INTEGER                   :: sub_dt   ! subtimstepping
 
- sub_dt =60 ! update evry min
-   
   it = 1 ! counter trough traced
   DO WHILE (it .LT. count_tracer) ! count tracer are all tracers set until here
     ! determining the first time step of the event
@@ -1041,7 +1047,7 @@ END SUBROUTINE velocity_interpol
 !-----------------------------------------------------------------------------------
 SUBROUTINE update_newtracer(velx,vely,timestep,traced, count_tracer,max_no_of_cells,tracpo,max_tracers)
 !OCH TO DO: dt and resolution should be parameter read by USE from module
-USE cp_parameters, ONLY : dsize_x, dsize_y, res, max_tracer_CP
+USE cp_parameters, ONLY : dsize_x, dsize_y, res, max_tracer_CP, dt
 
   INTEGER, INTENT(IN)       :: timestep,max_no_of_cells, max_tracers
   REAL, INTENT(IN)          :: velx(dsize_x,dsize_y), &
@@ -1058,7 +1064,7 @@ USE cp_parameters, ONLY : dsize_x, dsize_y, res, max_tracer_CP
   REAL                      :: wgt_x, wgt_y, wgt_xt, wgt_yt
   INTEGER, INTENT(IN)       :: tracpo(2,max_tracers)
   INTEGER                   :: sub_dt   ! subtimstepping
-  sub_dt =60 ! update evry min
+  sub_dt =dt/5 ! !update 5 times within timestep 60 ! update evry min
   it = 1 ! counter trough traced
   DO WHILE (it .LT. count_tracer) ! count tracer are all tracers set until here
    IF (int(traced(tracpo(1,it),tracpo(2,it),18)) .eq.int(traced(tracpo(1,it),tracpo(2,it),7)) )THEN
@@ -1145,7 +1151,7 @@ END SUBROUTINE update_newtracer
 SUBROUTINE update_tracer(velx,vely,timestep,traced, count_tracer,max_no_of_cells,tracpo,max_tracers, &
                          CPinfo)
 !OCH TO DO: dt and resolution should be parameter read by USE from module
-USE cp_parameters, ONLY : dsize_x, dsize_y, res, max_tracer_CP, max_age
+USE cp_parameters, ONLY : dsize_x, dsize_y, res, max_tracer_CP, max_age, dt
 
   INTEGER, INTENT(IN)       :: timestep,max_no_of_cells, max_tracers
   REAL, INTENT(IN)          :: velx(dsize_x,dsize_y), &
@@ -1163,7 +1169,7 @@ USE cp_parameters, ONLY : dsize_x, dsize_y, res, max_tracer_CP, max_age
   REAL                      :: wgt_x, wgt_y, wgt_xt, wgt_yt
   INTEGER, INTENT(IN)       :: tracpo(2,max_tracers)
   INTEGER                   :: sub_dt   ! subtimstepping
-  sub_dt =60 ! update evry min
+  sub_dt =dt/5  ! update 5 times within output timestep 60 ! update evry min
   it = 1 ! counter trough traced
   DO WHILE (it .LT. count_tracer) ! count tracer are all tracers set until here
 !   IF (traced(tracpo(1,it),tracpo(2,it),11) .eq. 1) then
