@@ -103,7 +103,8 @@ coarsevel_filename = trim(odir)// "output/raincell/irt_advection_field.srv"
 
 ! extracting the argument from the command line
 CALL getarg(1,iteration_str)
-
+WRITE (*,*) "target=",iteration_str
+ 
 ! checking if this is the first or a higher iteration
 IF (iteration_str .EQ. "1") THEN
    iteration = 1

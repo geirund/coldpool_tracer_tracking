@@ -95,10 +95,10 @@ write(*,*) odir
 write(*,*) dsize_x, dsize_y, dt, res
 write(*,*) cutoff,minimum_size
 
-DO i=0,n_fields
-  WRITE(input_filename(i+1),"(A33,I2.2,A4)") "input/raincell/irt_objects_input_",i,".srv"
-ENDDO
-WRITE(*,*) input_filename(1)
+!DO i=0,n_fields
+!  WRITE(input_filename(i+1),"(A33,I2.2,A4)") "input/raincell/irt_objects_input_",i,".srv"
+!ENDDO
+!WRITE(*,*) input_filename(1)
 output_filename    =trim(odir)// "output/raincell/irt_objects_output.txt"
 mask_filename      = trim(odir)// "output/raincell/irt_objects_mask.srv"
 coarsevel_filename = trim(odir)// "output/raincell/irt_advection_field.srv"
@@ -117,10 +117,10 @@ ELSE
 ENDIF
 write(*,*) "hier 2"
 
-! open the input filenames
-DO fileid=1,n_fields+1
-  OPEN(fileid,FILE=trim(odir)//trim(input_filename(fileid)),FORM='unformatted', ACTION='read')
-ENDDO
+!! open the input filenames
+!DO fileid=1,n_fields+1
+!  OPEN(fileid,FILE=trim(odir)//trim(input_filename(fileid)),FORM='unformatted', ACTION='read')
+!ENDDO
 
 ! open the output filenames
 OPEN(20,FILE=trim(output_filename),FORM='formatted', ACTION='write')

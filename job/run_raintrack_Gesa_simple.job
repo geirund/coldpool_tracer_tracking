@@ -5,28 +5,30 @@
 ##########################
 # SET PATH
 #
-
+sim='accacia_oceancase_varfluxes_CCNfixed_large_night'
 from='Gesatest3' #'test1plus4K'
-JOBNAME='Gesatest_all3' #indp2K_500tr_neu2' 
-FIN=$modelo/COSMO_LES_ACCACIA/organisationssim/accacia_oceancase_varfluxes_CCNfixed_large_night/totprec_merged_newdim.nc #totprec_merged_nodim.nc
-INv=$modelo/COSMO_LES_ACCACIA/organisationssim/accacia_oceancase_varfluxes_CCNfixed_large_night/vwind_merged.nc
-INu=$modelo/COSMO_LES_ACCACIA/organisationssim/accacia_oceancase_varfluxes_CCNfixed_large_night/uwind_merged.nc
-domsizex=350 #1024 #320 #  #todo: needs to be changed as input in rain tracking
-domsizey=350 #1024 #320 #
+JOBNAME='test_control' #indp2K_500tr_neu2' 
 
-OUT=/nbi/ac/conv1/henneb/results/coldpool/${JOBNAME}/
+FIN=/scratch/snx3000/geirund/LES_sim/organisationssim/${sim}/output/totprec_merged_newdim.nc #totprec_merged_nodim.nc
+INv=/scratch/snx3000/geirund/LES_sim/organisationssim/${sim}/postproc/vwind_merged.nc
+INu=/scratch/snx3000/geirund/LES_sim/organisationssim/${sim}/postproc/uwind_merged.nc
+domsizex=350 #todo: needs to be changed as input in rain tracking
+domsizey=350 
+
+OUT=/scratch/snx3000/geirund/celltrack/celltrack_olga/${JOBNAME}/
+echo $OUT
 
 ## SET PARAMETER
-cutoff=0.02                                     # cut off for precip (mm/s)
+cutoff=0.02                                     # cut off for precip (mm/s) --> wurde gecheckt anhand von Daten
 mincellsize=30.                              # minimum rain cell size, use 3 strings
-trackstartsize=30.  #unwichtig                         # minimum size when trac starts
+trackstartsize=30.  #unwichtig, wird nicht mehr benutzt                         # minimum size when trac starts
 mintracersize=50.   # unwichtig                         # minimum size for tracer tracking 
 dt=360
 res=200
 tracer=500                                   # number of tracer per CP
 alltracer=500                                # alt aus einer version als ich zu mehrern zeitschritten tarcer gesetzt habe 
 
-age=50                                       # Max age of CPs
+age=50                                       # Max age of CPs (timesteps) (kann auch recht gross sein)
 lformat=nc #srv
 lirt="run" #"link" #"copy" # "run" #"run" #'copy' 
 
@@ -59,7 +61,7 @@ mkdir -p ${OUT}/job
        <namelist.tmp>${OUT}/job/namelist.dat
 cd ..
 startdir=$(pwd)
-#echo $startdir
+echo $startdir
 echo 'made directory structure ' $JOBNAME
 cd ${OUT} 
 #############################
@@ -74,27 +76,31 @@ if [ $lirt == "run" ]; then
 ### prepare input
 ######################################################
 # cdo sellevidx,8 -selvar,moisture_divergence $FIN ${OUT}/input/raincell/irt_objects_input_00.nc
-# cdo selvar,TOT_PREC $FIN ${OUT}/input/raincell/irt_objects_input_00.nc
+cdo selvar,TOT_PREC $FIN ${OUT}/input/raincell/irt_objects_input_00.nc
 
 # sorry etwas unschoen aber im code steht der Variablenname "T" noch hardcoded drinne, deshalb bennen sich die hier mal um
 # ncrename -v moisture_divergence,T ${OUT}/input/raincell/irt_objects_input_00.nc ${OUT}/input/raincell/irt_objects_input_00.nc 
 #ncrename -v TOT_PREC,T ${OUT}/input/raincell/irt_objects_input_00.nc ${OUT}/input/raincell/irt_objects_input_00.nc
 #cp $FIN ${OUT}/input/raincell/irt_objects_input_00.nc 
-cp $OUT/../${from}/input/raincell/irt_objects_input_00.nc ${OUT}/input/raincell/irt_objects_input_00.nc  
+#cp $OUT/../${from}/input/raincell/irt_objects_input_00.nc ${OUT}/input/raincell/irt_objects_input_00.nc  
 #
 #####################################################
 ### run_tracking
 ####################################################
   ${startdir}/bin/raincell/irt_objects_release.x 1
+  echo 'Fortran 1 '
   ${startdir}/bin/raincell/irt_advection_field_release.x
+  echo 'Fortran 2 '
   ${startdir}/bin/raincell/irt_tracks_release.x
+  echo 'Fortran 3 '
   sort -n -k2 ${OUT}/output/raincell/irt_tracks_nohead_output.txt > ${OUT}/output/raincell/irt_tracks_sorted.txt
+  echo 'sorting'
   ${startdir}/bin/raincell/irt_trackmask_release.x
 
   cdo -f nc copy ${OUT}/output/raincell/irt_objects_mask.srv ${OUT}/output/raincell/irt_objects_mask.nc
   cdo -f nc copy ${OUT}/output/raincell/irt_tracks_mask.srv ${OUT}/output/raincell/irt_tracks_mask.nc
 
-  ncl path=\"${OUT}/output/raincell/\" ${startdir}/bin/fill_tracks.ncl
+  ncl path=\"${OUT}output/raincell/\" ${startdir}/bin/fill_tracks.ncl
 
 ###################################################
 # prepare input for cold pool tracking 

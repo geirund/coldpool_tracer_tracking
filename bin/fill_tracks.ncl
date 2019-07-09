@@ -5,6 +5,14 @@ begin
 
  objects  = fio->var1
  tracksin = fit->var1
+ printVarSummary(objects)
+ dsizes = dimsizes(objects)
+ exists = isfilepresent(path+"irt_tracks_mask_fulltime.nc")
+ if(exists) then
+   print("file there")
+   del = systemfunc("rm " + path + "irt_tracks_mask_fulltime.nc")
+   print(del)
+ end if
 
  fo = addfile(path+"irt_tracks_mask_fulltime.nc","c")
        fAtt               = True            ; assign file attributes
@@ -12,7 +20,10 @@ begin
        fAtt@source_file   =  "irt_tracks_mask.nc"
        fAtt@Conventions   = "None"
        fAtt@creation_date = systemfunc ("date")
-     filedimdef(fo,"time",-1,True)
+       dim_names = (/"time","lev","y","x" /)
+       dim_sizes = (/-1,dsizes(1),dsizes(2),dsizes(3)/)
+       dimUnlim = (/ True, False, False, False/)
+       filedimdef(fo,dim_names,dim_sizes,dimUnlim)
 
 ; tt!2 ="xt"
 ; tt!3 ="yt"

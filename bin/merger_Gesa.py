@@ -16,7 +16,7 @@ atime = datetime.datetime.now()
 ###############################################################
 # SETTINGS
 # ###############################################################
-DIR = '/nbi/ac/conv1/henneb/results/coldpool/'
+DIR = '/scratch/snx3000/geirund/celltrack/celltrack_olga/'
 #EXPID='test1plus4K_finneu1/'
 parser = argparse.ArgumentParser(description=('open file and do whatever'))
 parser.add_argument('filename', type=str,help=('file name'))
@@ -69,7 +69,7 @@ for line in lines:
   time_in    = int(columns[1])      # time
   conv_in     = float(columns[6])    # divergence
   size_in     = float(columns[4])    # size
-  print conv_in
+  print(conv_in)
   age = time_in-trackStart[ID] +1 
 #  if conv_in < -0.0025 and size_in > 50 and not ID in startTracer.keys():
      # first time of this track, wenn divergence > 0.025 ->start tracer
@@ -79,7 +79,7 @@ for line in lines:
 
   # last object of this track
   if age == dur[ID]:
-    print ID, objID_in
+    print(ID, objID_in)
     endObjp1[ID] = next_objID[objID_in] # OBJ ID of next timestep, which is zero if terminates or the ID within the trackit merges into
 #    if not ID in startTracer.keys(): # if divergence never high enough, dont set tracer, set merging to 0
 #      merger[ID] = 0
